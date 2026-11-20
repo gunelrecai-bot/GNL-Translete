@@ -214,11 +214,11 @@ final class ConversationController {
         return candidates.contains { Self.similarity($0, text) > 0.6 }
     }
 
-    static func words(_ s: String) -> Set<String> {
+    nonisolated static func words(_ s: String) -> Set<String> {
         Set(s.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty })
     }
 
-    static func similarity(_ a: String, _ b: String) -> Double {
+    nonisolated static func similarity(_ a: String, _ b: String) -> Double {
         let x = words(a), y = words(b)
         guard !x.isEmpty, !y.isEmpty else { return 0 }
         return Double(x.intersection(y).count) / Double(min(x.count, y.count))
