@@ -1,0 +1,191 @@
+import SwiftUI
+import AVFoundation
+
+struct SettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var s = settings
+        List {
+            NavigationLink { AppearanceSettingsView() } label: { Label("Görünüm", systemImage: "paintpalette") }
+            NavigationLink { VoiceSettingsView() } label: { Label("Ses ve Konuşma", systemImage: "speaker.wave.2") }
+            Section("Ana Ekrana Dönünce") {
+                Picker("Ana Ekrana Dönünce", selection: $s.resumeBehavior) {
+                    ForEach(ResumeBehavior.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline).labelsHidden()
+                Text("Kamera veya Kaydedilenler kapanınca dinleme nasıl sürsün. Bilerek Duraklat'a bastıysan Devam Et'e dokunana kadar beklenir.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Ayarlar")
+    }
+}
+
+// MARK: Görünüm
+struct AppearanceSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        @Bindable var s = settings
+        List {
+            Section {
+                PreviewCard(palette: settings.palette(for: scheme))
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            }
+            Section {
+                Picker("Tema kaynağı", selection: $s.themeSource) {
+                    ForEach(ThemeSource.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.pickerStyle(.segmented)
+            }
+            switch settings.themeSource {
+            case .preset:
+                Section("Hazır Temalar") {
+                    ForEach(Themes.all) { t in
+                        Button { settings.presetID = t.id } label: { themeRow(t, selected: settings.presetID == t.id) }
+                    }
+                }
+            case .custom:
+                Section("Kendi Temam") {
+                    ColorPicker("Zemin", selection: binding(\.background), supportsOpacity: false)
+                    ColorPicker("Sohbet kartı", selection: binding(\.card), supportsOpacity: false)
+                    ColorPicker("Sen söyle vurgusu", selection: binding(\.accent), supportsOpacity: false)
+                    Text("Yazı rengi, okunaklı kalması için arka plana göre otomatik seçilir.").font(.footnote).foregroundStyle(.secondary)
+                }
+            case .system:
+                Section("Açık görünümde") {
+                    Picker("Açık", selection: $s.lightThemeID) { ForEach(Themes.all) { Text($0.name).tag($0.id) } }
+                }
+                Section("Koyu görünümde") {
+                    Picker("Koyu", selection: $s.darkThemeID) { ForEach(Themes.all) { Text($0.name).tag($0.id) } }
+                }
+            }
+            Section { Text("Uygulama simgesi kendi renklerini korur.").font(.footnote).foregroundStyle(.secondary) }
+        }
+        .navigationTitle("Görünüm")
+    }
+
+    private func binding(_ kp: WritableKeyPath<ThemePalette, RGB>) -> Binding<Color> {
+        Binding(get: { settings.customPalette[keyPath: kp].color },
+                set: { settings.customPalette[keyPath: kp] = RGB(color: $0) })
+    }
+
+    private func themeRow(_ t: ThemeDef, selected: Bool) -> some View {
+        HStack {
+            HStack(spacing: 0) {
+                t.palette.background.color; t.palette.card.color; t.palette.accent.color
+            }
+            .frame(width: 66, height: 26).clipShape(RoundedRectangle(cornerRadius: 6))
+            Text(t.name).foregroundStyle(.primary)
+            Spacer()
+            if selected { Image(systemName: "checkmark") }
+        }
+    }
+}
+
+struct PreviewCard: View {
+    let palette: ThemePalette
+    var body: some View {
+        let th = ResolvedTheme(p: palette)
+        VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Duyulan").font(.caption.bold()); Text("Would you like a window seat?")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            .background(th.card, in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(th.onCard)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Sen söyle").font(.caption.bold()); Text("Yes, please. That would be great.")
+                Text("Evet, lütfen. Harika olur.").font(.caption).opacity(0.8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            .background(th.accent, in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(th.onAccent)
+        }
+        .padding(14)
+        .background(th.bg, in: RoundedRectangle(cornerRadius: 18))
+        .animation(.easeInOut, value: palette)
+    }
+}
+
+// MARK: Ses ve Konuşma
+struct VoiceSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.scenePhase) private var phase
+    @State private var trVoices: [AVSpeechSynthesisVoice] = []
+    @State private var enVoices: [AVSpeechSynthesisVoice] = []
+    @State private var previewNote: String?
+
+    var body: some View {
+        @Bindable var s = settings
+        List {
+            voiceSection(title: "Türkçe çeviri sesi", lang: .tr, voices: trVoices, selection: $s.trVoiceID,
+                         sample: "Merhaba, çeviriler bu sesle okunacak.")
+            Section("Türkçe hız") {
+                Picker("Türkçe hız", selection: $s.trSpeed) { ForEach(SpeechSpeed.allCases, id: \.self) { Text($0.title).tag($0) } }
+                    .pickerStyle(.segmented).labelsHidden()
+            }
+            voiceSection(title: "İngilizce cevap / pratik sesi", lang: .en, voices: enVoices, selection: $s.enVoiceID,
+                         sample: "Hello! Your English suggestions will sound like this.")
+            Section("İngilizce hız") {
+                Picker("İngilizce hız", selection: $s.enSpeed) { ForEach(SpeechSpeed.allCases, id: \.self) { Text($0.title).tag($0) } }
+                    .pickerStyle(.segmented).labelsHidden()
+                Text("Tekrar Dinle normal hızda, Yavaş Dinle daha yavaş okur; bu ayarı değiştirmez.").font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Ek ses indirme") {
+                Text("iPhone Ayarlar → Erişilebilirlik → Okunan İçerik → Sesler → Türkçe veya İngilizce → istediğin sesi indir. Uygulamaya dönünce liste kendiliğinden yenilenir. Hazır sesler yeterliyse indirme gerekmez.")
+                    .font(.footnote)
+                Button("iPhone Ayarlarını Aç") {
+                    if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                }
+            }
+        }
+        .navigationTitle("Ses ve Konuşma")
+        .onAppear(perform: reload)
+        .onChange(of: phase) { _, p in if p == .active { reload() } }
+    }
+
+    private func reload() {
+        trVoices = SpeechOutput.voices(.tr)
+        enVoices = SpeechOutput.voices(.en)
+    }
+
+    private func voiceSection(title: String, lang: SpeechLang, voices: [AVSpeechSynthesisVoice], selection: Binding<String?>, sample: String) -> some View {
+        let resolved = SpeechOutput.shared.resolvedVoice(lang)
+        return Section(title) {
+            if resolved.fellBack {
+                Label("Seçili ses artık yok; \(resolved.voice?.name ?? "yerel ses") kullanılıyor.", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            ForEach(voices, id: \.identifier) { v in
+                Button {
+                    selection.wrappedValue = v.identifier
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(v.name).foregroundStyle(.primary)
+                            Text(describe(v)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if resolved.voice?.identifier == v.identifier { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+            Button("Sesi Önizle") {
+                if AudioRoute.shared.headphonesActive {
+                    previewNote = nil
+                    SpeechOutput.shared.enqueue(.init(text: sample, lang: lang, rateFactor: nil, generation: Int.max, publicSpeaker: false))
+                } else {
+                    previewNote = "Önizleme kulaklıktan çalar. AirPods'u takıp tekrar dene."
+                }
+            }
+            if let n = previewNote { Text(n).font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func describe(_ v: AVSpeechSynthesisVoice) -> String {
+        let gender: String = switch v.gender { case .female: "Kadın"; case .male: "Erkek"; default: "Belirtilmemiş" }
+        let region: String = v.language == "en-US" ? "Amerikan" : v.language == "en-GB" ? "Britanya" : v.language
+        let q: String = switch v.quality { case .premium: "Premium"; case .enhanced: "Gelişmiş"; default: "Standart" }
+        return "\(gender) · \(region) · \(q)"
+    }
+}

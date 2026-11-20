@@ -1,0 +1,6 @@
+Frameworks/
+*.xcodeproj
+build/
+Payload/
+*.ipa
+GNLTranslete/Info.plist
