@@ -45,7 +45,9 @@ struct SetupView: View {
                     row("Çeviri dil paketi (Türkçe ⇄ İngilizce)", ok: transReady,
                         detail: transText) {
                         Button("İndir") {
-                            transConfig = .init(source: Translator.tr, target: Translator.en)
+                            // ikinci dokunuşta da sistem indirme penceresini yeniden tetikle
+                            if transConfig == nil { transConfig = .init(source: Translator.tr, target: Translator.en) }
+                            else { transConfig?.invalidate() }
                         }
                     }
                     row("Cevap üretim modeli", ok: model.state == .ready, detail: modelText) {
@@ -90,7 +92,13 @@ struct SetupView: View {
             try? await session.prepareTranslation()
             await refreshAsync()
         }
-        .task { refresh() }
+        .task {
+            // Ayarlar'dan dil indirildiğinde de durum kendiliğinden güncellensin
+            while !Task.isCancelled {
+                await refreshAsync()
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
     }
 
     private var transReady: Bool { trans?.trEn == .installed && trans?.enTr == .installed }
