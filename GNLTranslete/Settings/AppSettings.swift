@@ -42,6 +42,7 @@ final class AppSettings {
     var enVoiceID: String? { didSet { d.set(enVoiceID, forKey: "enVoice") } }
     var trSpeed: SpeechSpeed { didSet { d.set(trSpeed.rawValue, forKey: "trSpeed") } }
     var enSpeed: SpeechSpeed { didSet { d.set(enSpeed.rawValue, forKey: "enSpeed") } }
+    var modelTier: ModelTier { didSet { d.set(modelTier.rawValue, forKey: "modelTier") } }
 
     private init() {
         setupComplete = d.bool(forKey: "setupComplete")
@@ -60,6 +61,7 @@ final class AppSettings {
         enVoiceID = d.string(forKey: "enVoice")
         trSpeed = SpeechSpeed(rawValue: d.string(forKey: "trSpeed") ?? "") ?? .normal
         enSpeed = SpeechSpeed(rawValue: d.string(forKey: "enSpeed") ?? "") ?? .normal
+        modelTier = ModelTier(rawValue: d.string(forKey: "modelTier") ?? "") ?? .fast
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {

@@ -9,6 +9,7 @@ struct SettingsView: View {
         List {
             NavigationLink { AppearanceSettingsView() } label: { Label("Görünüm", systemImage: "paintpalette") }
             NavigationLink { VoiceSettingsView() } label: { Label("Ses ve Konuşma", systemImage: "speaker.wave.2") }
+            ModelTierSection()
             Section("Ana Ekrana Dönünce") {
                 Picker("Ana Ekrana Dönünce", selection: $s.resumeBehavior) {
                     ForEach(ResumeBehavior.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -187,5 +188,57 @@ struct VoiceSettingsView: View {
         let region: String = v.language == "en-US" ? "Amerikan" : v.language == "en-GB" ? "Britanya" : v.language
         let q: String = switch v.quality { case .premium: "Premium"; case .enhanced: "Gelişmiş"; default: "Standart" }
         return "\(gender) · \(region) · \(q)"
+    }
+}
+
+
+// MARK: Cevap Modeli (Hızlı / Kaliteli)
+struct ModelTierSection: View {
+    @Environment(AppSettings.self) private var settings
+    @State private var store = ModelStore.shared
+
+    var body: some View {
+        @Bindable var s = settings
+        Section {
+            Picker("Cevap modeli", selection: $s.modelTier) {
+                ForEach(ModelTier.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            ForEach(ModelTier.allCases, id: \.self) { t in
+                let info = LLMModelInfo.of(t)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("\(t.title): \(info.name)").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        switch store.states[t] ?? .missing {
+                        case .ready:
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        case .downloading(let p):
+                            Text("%\(Int(p * 100))").font(.footnote.monospacedDigit())
+                        case .missing, .failed:
+                            Button("İndir") { store.download(t) }.buttonStyle(.bordered)
+                        }
+                    }
+                    Text("\(info.note) · Lisans: \(info.license)").font(.caption).foregroundStyle(.secondary)
+                    if case .failed(let e) = store.states[t] ?? .missing {
+                        Text("İndirme hatası: \(e)").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                .swipeActions {
+                    if store.states[t] == .ready && store.activeTier != t {
+                        Button(role: .destructive) { store.delete(t) } label: { Label("Sil", systemImage: "trash") }
+                    }
+                }
+            }
+            if store.activeTier != settings.modelTier {
+                Text("\(settings.modelTier.title) model henüz indirilmedi; şimdilik \(store.activeTier.title) model kullanılıyor.")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Cevap Modeli")
+        } footer: {
+            Text("İndirme Wi-Fi'de yapılmalı ve bitene kadar uygulama açık kalmalı. Kullanılmayan modeli sola kaydırıp silebilirsin.")
+        }
+        .onAppear { store.refresh() }
     }
 }

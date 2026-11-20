@@ -11,14 +11,19 @@ struct ReplyResult {
 final class ReplyGenerator {
     static let shared = ReplyGenerator()
     private var engine: LlamaEngine?
+    private var loadedTier: ModelTier?
     private(set) var loadError: String?
 
     var isLoaded: Bool { engine != nil }
 
     func loadIfNeeded() {
-        guard engine == nil, ModelStore.shared.state == .ready else { return }
-        do { engine = try LlamaEngine(modelPath: ModelStore.shared.fileURL.path); loadError = nil }
-        catch { loadError = error.localizedDescription }
+        let store = ModelStore.shared
+        let tier = store.activeTier
+        if engine != nil && loadedTier == tier { return }
+        guard store.state == .ready else { return }
+        engine = nil   // önceki modeli bellekten çıkar
+        do { engine = try LlamaEngine(modelPath: store.fileURL.path); loadedTier = tier; loadError = nil }
+        catch { loadError = error.localizedDescription; loadedTier = nil }
     }
 
     func unload() { engine = nil }

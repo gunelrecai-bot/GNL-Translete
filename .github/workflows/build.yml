@@ -40,6 +40,13 @@ jobs:
           echo "$URL" > Frameworks/LLAMA_VERSION.txt
           ls Frameworks/llama.xcframework
 
+      - name: Model indirme adreslerini kontrol et
+        continue-on-error: true
+        run: |
+          for u in $(grep -ho 'https://huggingface.co[^"]*gguf' GNLTranslete/LLM/ModelStore.swift); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -I -L "$u"); echo "$code $u"
+          done
+
       - name: Xcode projesini oluştur
         run: xcodegen generate
 
