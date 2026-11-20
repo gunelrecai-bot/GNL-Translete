@@ -115,6 +115,12 @@ final class ConversationController {
         partial = ""
         if isEcho(heard.text) { return }
 
+        // Seyahat modunda Türkçe söz kullanıcının kendisidir: cevap önerisi değil, İngilizcesi gerekir.
+        if heard.language == .tr && AppSettings.shared.mode == .travel {
+            await translateOwn(heard.text)
+            return
+        }
+
         generation += 1
         let gen = generation
         speech.dropOlder(than: gen)    // güncelliğini yitirmiş öneriler kuyrukta birikmesin
@@ -202,7 +208,6 @@ final class ConversationController {
             else if t.heardLanguage == .tr { line = t.translation.isEmpty ? t.heard : t.translation }
             else { line = t.englishEquivalent.isEmpty ? t.heard : t.englishEquivalent }
             out.append(.init(speaker: t.isOwnTranslation ? "User" : "Other", english: line))
-            if !t.suggestion.isEmpty { out.append(.init(speaker: "Suggested reply for user", english: t.suggestion)) }
         }
         return Array(out.suffix(20))
     }

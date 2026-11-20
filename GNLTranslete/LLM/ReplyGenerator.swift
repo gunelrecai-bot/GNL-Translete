@@ -44,7 +44,8 @@ final class ReplyGenerator {
         TONE: none or comma list of joke, teasing, sarcasm, slang, rude, profanity, insult, argument, warning, threat
         SURE: yes | no
         NATURAL: the latest line rewritten as natural, correct English with the same meaning and the same strength
-        REPLY: <the English reply>
+        REPLY: the English reply, plain text, no brackets or quotes
+        Reply ONLY to the latest line. Use earlier lines just as background; never quote or repeat them unless the latest line refers to them.
         """
 
         var convo = "Conversation so far (oldest first):\n"
@@ -70,7 +71,8 @@ final class ReplyGenerator {
         if reply.isEmpty {
             reply = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        reply = reply.trimmingCharacters(in: CharacterSet(charactersIn: "\"“” "))
+        reply = reply.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”<>[] "))
+        natural = natural.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”<>[] "))
         guard !reply.isEmpty else { return nil }
         let kinds = ToneKind.allCases.filter { toneLine.contains($0.rawValue) }
         return ReplyResult(reply: reply, tone: ToneResult(kinds: kinds, certain: sure), topic: topic, natural: natural)
