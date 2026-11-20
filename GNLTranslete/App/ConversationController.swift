@@ -115,10 +115,11 @@ final class ConversationController {
         partial = ""
         if isEcho(heard.text) { return }
 
-        // Seyahat modunda Türkçe söz kullanıcının kendisidir: cevap önerisi değil, İngilizcesi gerekir.
-        if heard.language == .tr && AppSettings.shared.mode == .travel {
-            await translateOwn(heard.text)
-            return
+        // Seyahat modunda Türkçe konuşmalar hiç işlenmez (kullanıcı Cümlemi Çevir'i kullanır).
+        var heard = heard
+        if AppSettings.shared.mode == .travel {
+            if heard.language == .tr { return }
+            if heard.language == .mixed { heard = HeardTurn(text: heard.text, language: .en, confidence: heard.confidence) }
         }
 
         generation += 1

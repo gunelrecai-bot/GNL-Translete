@@ -35,7 +35,9 @@ final class ReplyGenerator {
 
         let system = """
         You help a Turkish speaker reply in spoken English. \(modeText)
-        Write ONE natural reply the user can say out loud, using simple, common words. Match the length to the conversation; no fixed limit.
+        Write ONE natural reply the user can say out loud, using simple, common words.
+        Match the length to the latest line: a short or incomplete line gets a short reply (one short sentence or a short question). Never write a long reply to a short line.
+        If the latest line is unclear or incomplete, guess the most likely meaning in NATURAL and reply briefly, or ask one short clarifying question.
         If the last line is not a question, suggest a fitting reaction or a follow-up question.
         Never invent the user's preferences or facts that were not said. If needed, offer options ("Either is fine" / "Maybe A or B?") or a short clarification question in English.
         Keep the reply calm and appropriate even if the other person is rude.
@@ -45,6 +47,28 @@ final class ReplyGenerator {
         SURE: yes | no
         NATURAL: the latest line rewritten as natural, correct English with the same meaning and the same strength
         REPLY: the English reply, plain text, no brackets or quotes
+        Examples:
+        Latest line: going to school
+        TOPIC: continue
+        TONE: none
+        SURE: yes
+        NATURAL: I'm going to school.
+        REPLY: Oh, nice. Have a good day!
+
+        Latest line: Would you like a window seat?
+        TOPIC: continue
+        TONE: none
+        SURE: yes
+        NATURAL: Would you like a window seat?
+        REPLY: Yes, please. That would be great.
+
+        Latest line: sorry we full tonight
+        TOPIC: new
+        TONE: none
+        SURE: yes
+        NATURAL: Sorry, we're fully booked tonight.
+        REPLY: Oh, I see. Is there another hotel nearby?
+
         Reply ONLY to the latest line. Use earlier lines just as background; never quote or repeat them unless the latest line refers to them.
         """
 
@@ -53,8 +77,29 @@ final class ReplyGenerator {
         convo += "\nLatest line from the other person: \(latestEnglish)\n"
         if let hint, !hint.isEmpty { convo += "The user's own direction for the reply (Turkish): \(hint)\n" }
 
-        let raw = await engine.generate([.init(role: "system", content: system), .init(role: "user", content: convo)], maxTokens: 220, temperature: 0.5)
-        return Self.parse(raw)
+        // Uzunluk konuşmaya göre: kısa söze kısa cevap
+        let inWords = latestEnglish.split(separator: " ").count
+        let budget = min(160, 70 + inWords * 6)
+        let raw = await engine.generate([.init(role: "system", content: system), .init(role: "user", content: convo)], maxTokens: budget, temperature: 0.3)
+        guard var r = Self.parse(raw) else { return nil }
+        if inWords <= 5 { r.reply = Self.firstSentences(r.reply, max: 2, maxWords: 16) }
+        return r
+    }
+
+    /// Kısa sözlere gelen uzun cevapları ilk cümle(ler)de keser.
+    static func firstSentences(_ text: String, max: Int, maxWords: Int) -> String {
+        var out: [String] = []
+        var current = ""
+        for ch in text {
+            current.append(ch)
+            if ".!?".contains(ch) {
+                out.append(current.trimmingCharacters(in: .whitespaces)); current = ""
+                let words = out.joined(separator: " ").split(separator: " ").count
+                if out.count >= max || words >= maxWords { break }
+            }
+        }
+        if out.isEmpty { return text }
+        return out.joined(separator: " ")
     }
 
     static func parse(_ raw: String) -> ReplyResult? {
