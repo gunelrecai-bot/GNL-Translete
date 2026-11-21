@@ -17,6 +17,18 @@ final class ConversationController {
     }
     private(set) var level: Float = 0
     private(set) var hearingSpeech = false
+    private var speechOffWork: DispatchWorkItem?
+    /// "Konuşma algılandı" göstergesi anında açılır, 0,7 sn sessizlikten sonra kapanır (titremesin)
+    private func setHearing(_ on: Bool) {
+        if on {
+            speechOffWork?.cancel(); speechOffWork = nil
+            if !hearingSpeech { hearingSpeech = true }
+        } else if hearingSpeech && speechOffWork == nil {
+            let w = DispatchWorkItem { [weak self] in self?.hearingSpeech = false; self?.speechOffWork = nil }
+            speechOffWork = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: w)
+        }
+    }
     private(set) var transcribing = 0
     private(set) var listening = false
     private(set) var errorText: String?
@@ -42,17 +54,17 @@ final class ConversationController {
         // Hoparlörden (Karşıya Oku) çalarken mikrofonu yok say: kendi sesimiz yeni söz sayılmasın.
         let sp = speech, rt = route
         recorder.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
-        recorder.onLevel = { [weak self] l, s in self?.level = l; self?.hearingSpeech = s }
+        recorder.onLevel = { [weak self] _, s in self?.setHearing(s) }
         recorder.onUtterance = { [weak self] samples in self?.enqueue(samples) }
         fallback.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
-        fallback.onLevel = { [weak self] l in self?.level = l; self?.hearingSpeech = l > 0.02 }
+        fallback.onLevel = { [weak self] l in self?.setHearing(l > 0.02) }
         fallback.onPartial = { [weak self] t in self?.partial = t }
         fallback.onTurn = { [weak self] heard in
             self?.partial = ""
             Task { await self?.handle(heard) }
         }
         live.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
-        live.onLevel = { [weak self] l, s in self?.level = l; self?.hearingSpeech = s }
+        live.onLevel = { [weak self] _, s in self?.setHearing(s) }
         live.onPartial = { [weak self] t in self?.partial = t }
         live.onTurn = { [weak self] heard in
             self?.partial = ""

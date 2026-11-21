@@ -77,7 +77,9 @@ struct MainView: View {
         HStack(spacing: 6) {
             Circle().fill(convo.listening ? Color.green : (route.headphonesActive ? Color.orange : Color.red)).frame(width: 9, height: 9)
             Text(convo.statusLine).font(.subheadline)
+                .lineLimit(1).minimumScaleFactor(0.7)   // tek satır: metin değişince ekran kaymasın
         }
+        .frame(height: 22)
         .foregroundStyle(theme.onBg.opacity(0.9))
     }
 
@@ -92,21 +94,28 @@ struct MainView: View {
                     ForEach(convo.turns) { t in
                         TurnCard(turn: t, onSave: { saveTarget = t }).id(t.id)
                     }
-                    if convo.hearingSpeech || convo.transcribing > 0 || !convo.partial.isEmpty {
-                        HStack(spacing: 8) {
-                            Image(systemName: "waveform").symbolEffect(.variableColor, isActive: true)
-                            Text(!convo.partial.isEmpty ? convo.partial : (convo.transcribing > 0 ? "Yazıya dökülüyor…" : "Konuşma algılandı…")).italic()
-                            Spacer()
-                        }
-                        .padding().foregroundStyle(theme.onCard.opacity(0.8))
-                        .background(theme.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 18))
-                        .id("partial")
-                    }
                     if let e = convo.errorText {
                         Text(e).font(.footnote).foregroundStyle(.red)
                     }
                 }
                 .padding(.vertical, 4)
+            }
+            .safeAreaInset(edge: .bottom) {
+                // Canlı metin / "konuşma algılandı" alanı: sabit yükseklikte, listeyi oynatmaz
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform").symbolEffect(.variableColor, isActive: convo.hearingSpeech)
+                    Text(!convo.partial.isEmpty ? convo.partial
+                         : (convo.transcribing > 0 ? "Yazıya dökülüyor…" : (convo.hearingSpeech ? "Konuşma algılandı…" : " ")))
+                        .italic().lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .frame(height: 48)
+                .foregroundStyle(theme.onCard.opacity(0.8))
+                .background(theme.card.opacity(convo.hearingSpeech || convo.transcribing > 0 || !convo.partial.isEmpty ? 0.6 : 0.15),
+                            in: RoundedRectangle(cornerRadius: 14))
+                .animation(.easeInOut(duration: 0.2), value: convo.hearingSpeech)
             }
             .onChange(of: convo.turns.count) { _, _ in
                 if let last = convo.turns.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
