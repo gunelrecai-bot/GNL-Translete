@@ -73,7 +73,7 @@ struct SetupView: View {
                     row("Seslendirme", ok: !SpeechOutput.voices(.tr).isEmpty && !SpeechOutput.voices(.en).isEmpty,
                         detail: "Türkçe: \(SpeechOutput.voices(.tr).count) ses · İngilizce: \(SpeechOutput.voices(.en).count) ses (iPhone'daki hazır sesler)") { EmptyView() }
 
-                    Text("Sürüm \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
+                    Text("Şu an dinleyen motor: \(ConversationController.shared.activeEngineName) · Sürüm \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
                         .font(.footnote.bold()).foregroundStyle(theme.onBg.opacity(0.75))
                     Text("Kamera izni, Kamera ilk açıldığında istenir. Konuşmalar, kamera görüntüleri ve pratik verileri sunucuya gönderilmez.")
                         .font(.footnote).foregroundStyle(theme.onBg.opacity(0.75))

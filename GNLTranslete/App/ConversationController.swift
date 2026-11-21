@@ -63,6 +63,14 @@ final class ConversationController {
         }
     }
 
+    /// Şu an dinleyen motorun adı (ekranda gösterilir)
+    var activeEngineName: String {
+        if usesApple { return "Apple" }
+        let w = WhisperEngine.shared
+        if w.state == .ready { return "Whisper \(w.size == .turbo ? "Turbo" : "Small")" }
+        return "Yerleşik tanıyıcı"
+    }
+
     var statusLine: String {
         let l: String
         if !AppSettings.shared.setupComplete { l = "Kurulum bekleniyor" }
@@ -74,7 +82,7 @@ final class ConversationController {
         else if hearingSpeech { l = "Konuşma algılandı" }
         else if listening { l = "Dinleniyor" }
         else { l = "Dinleme kapalı" }
-        return "\(l) · \(route.statusText)"
+        return "\(l) (\(activeEngineName)) · \(route.statusText)"
     }
 
     // MARK: Dinleme denetimi
