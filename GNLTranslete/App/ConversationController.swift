@@ -131,6 +131,8 @@ final class ConversationController {
         overlayPauses += 1
         stopListening()
         speech.stopAll()
+        // Arka planda dil modelini bellekten çıkar: telefonun geri kalanı yavaşlamasın
+        ReplyGenerator.shared.unload()
     }
     func enterForeground() {
         guard backgrounded else { return }
