@@ -21,6 +21,10 @@ struct MenuView: View {
                     NavigationLink { SetupView(embedded: true) } label: { Label("Kurulum Durumu", systemImage: "checklist") }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                Text("GNL-Canlı Çeviri · Sürüm \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
+                    .font(.footnote).foregroundStyle(.secondary).padding(.bottom, 8)
+            }
             .navigationTitle("Menü")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Kapat") { dismiss() } } }

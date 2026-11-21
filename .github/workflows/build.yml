@@ -61,7 +61,8 @@ jobs:
           set -o pipefail
           xcodebuild -project GNLTranslete.xcodeproj -scheme GNLTranslete \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tee build.log | xcbeautify || (tail -200 build.log; exit 1)
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} MARKETING_VERSION=0.1.${{ github.run_number }} build | tee build.log | xcbeautify || (tail -200 build.log; exit 1)
 
       - name: IPA paketle
         run: |
