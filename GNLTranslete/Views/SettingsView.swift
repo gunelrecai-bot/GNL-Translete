@@ -3,6 +3,7 @@ import AVFoundation
 
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
+    @State private var whisper = WhisperEngine.shared
 
     var body: some View {
         @Bindable var s = settings
@@ -15,17 +16,26 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.inline).labelsHidden()
                 .onChange(of: settings.speechEngine) { _, _ in ConversationController.shared.restartListening() }
+                if settings.speechEngine == .whisper {
+                    Picker("Whisper boyutu", selection: Binding(get: { whisper.size }, set: { v in
+                        Task { await whisper.switchSize(v); ConversationController.shared.restartListening() }
+                    })) {
+                        Text("Small — hızlı, hafif (~220 MB)").tag(WhisperSize.small)
+                        Text("Turbo — en isabetli, daha yavaş (~630 MB)").tag(WhisperSize.turbo)
+                    }
+                    Text(whisperStatus).font(.footnote).foregroundStyle(.secondary)
+                }
                 Toggle("Gürültü azaltma", isOn: $s.noiseReduction)
                     .onChange(of: settings.noiseReduction) { _, _ in ConversationController.shared.restartListening() }
                 Toggle("Konuya göre ipucu (Apple motoru)", isOn: $s.contextHints)
             } header: { Text("Konuşma Motoru") } footer: {
-                Text("Gürültü azaltma: kalabalık ortamda işe yarar, uzaktaki sesi biraz kısabilir. Konuya göre ipucu: sohbette geçen kelimeler motora verilir, isimler ve tekrar eden kelimeler daha doğru yazılır; hiçbir şey kaydedilmez, gönderilmez. Apple: konuşurken anlık yazar, telefona yük bindirmez. Whisper: cümle bitince yazar; hafif Small sürümü telefonun yapay zekâ çipinde çalışır ve yalnızca bu seçenek açıkken belleğe yüklenir, uygulamadan çıkınca bellekten silinir. İlk seçimde ~220 MB iner.")
+                Text("Gürültü azaltma: kalabalık ortamda işe yarar, uzaktaki sesi biraz kısabilir. Konuya göre ipucu: sohbette geçen kelimeler motora verilir, isimler ve tekrar eden kelimeler daha doğru yazılır; hiçbir şey kaydedilmez, gönderilmez. Apple: konuşurken anlık yazar, telefona yük bindirmez. Whisper: cümle bitince yazar; yalnızca bu seçenek açıkken belleğe yüklenir, uygulamadan çıkınca bellekten silinir. Seçtiğin boyut ilk seferde iner; menüyü kapatınca hazırlanır.")
             }
             ModelTierSection()
             Section {
                 Toggle("Hafif mod (önerilen)", isOn: $s.lightMode)
             } header: { Text("Performans") } footer: {
-                Text("Açıkken 3. satır (doğal İngilizce) yalnızca Doğal İngilizceyi Dinle'ye basınca üretilir; telefon daha az ısınır ve yavaşlamaz. Daha da hafif istersen Kurulum Durumu'ndan Whisper Small'u seç.")
+                Text("Açıkken 3. satır (doğal İngilizce) yalnızca Doğal İngilizceyi Dinle'ye basınca üretilir; telefon daha az ısınır ve yavaşlamaz.")
             }
             Section {
                 Toggle("İngilizce sözlerin Türkçesini kulaklıktan otomatik oku", isOn: $s.autoReadTranslation)
@@ -42,6 +52,17 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Ayarlar")
+    }
+
+    private var whisperStatus: String {
+        switch whisper.state {
+        case .missing: return "İndirilmedi · menüyü kapatınca iner ve hazırlanır"
+        case .standby: return "İndirildi · menüyü kapatınca hazırlanır"
+        case .downloading(let p): return "İniyor %\(Int(p * 100))"
+        case .loading: return "Hazırlanıyor… \(whisper.stage)"
+        case .ready: return "Hazır · \(whisper.size == .turbo ? "Turbo" : "Small")"
+        case .failed(let e): return "Hata: \(e)"
+        }
     }
 }
 
