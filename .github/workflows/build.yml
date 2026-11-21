@@ -46,6 +46,10 @@ jobs:
           for u in $(grep -ho 'https://huggingface.co[^"]*gguf' GNLTranslete/LLM/ModelStore.swift); do
             code=$(curl -s -o /dev/null -w '%{http_code}' -I -L "$u"); echo "$code $u"
           done
+          for r in Qwen/Qwen3-1.7B-GGUF Qwen/Qwen3-4B-GGUF unsloth/Qwen3-1.7B-GGUF unsloth/Qwen3-4B-GGUF; do
+            echo "== $r"; curl -s "https://huggingface.co/api/models/$r" | grep -o '"rfilename":"[^"]*Q4_K_M[^"]*"' | head -3
+            curl -s "https://huggingface.co/api/models/$r" | grep -o '"license":"[^"]*"' | head -1
+          done
           echo "Whisper modelleri:"
           curl -s "https://huggingface.co/api/models/argmaxinc/whisperkit-coreml" | grep -o 'openai_whisper-large-v3[^/"]*' | sort -u
 
