@@ -17,29 +17,49 @@ final class AppleSpeechSupport {
     static let en = Locale(identifier: "en-US")
 
     var isReady: Bool { state == .ready }
+    /// Türkçe yeni motorda yoksa Apple Dikte motoru (DictationTranscriber) kullanılır.
+    private(set) var turkishViaDictation = false
+
+    static func module(for lang: DetectedLanguage, dictation: Bool, volatile: Bool) -> any SpeechModule {
+        let loc = lang == .tr ? tr : en
+        let rep: Set<SpeechTranscriber.ReportingOption> = volatile ? [.volatileResults] : []
+        if lang == .tr && dictation {
+            return DictationTranscriber(locale: loc, contentHints: [], transcriptionOptions: [],
+                                        reportingOptions: volatile ? [.volatileResults] : [],
+                                        attributeOptions: [.transcriptionConfidence])
+        }
+        return SpeechTranscriber(locale: loc, transcriptionOptions: [], reportingOptions: rep, attributeOptions: [.transcriptionConfidence])
+    }
 
     @MainActor
     func check() async {
         guard SpeechTranscriber.isAvailable else { state = .unsupported("Bu cihazda yeni konuşma motoru yok"); return }
         let supported = await SpeechTranscriber.supportedLocales.map { $0.identifier(.bcp47) }
-        let hasTR = supported.contains { $0.hasPrefix("tr") }
         let hasEN = supported.contains { $0.hasPrefix("en") }
+        var hasTR = supported.contains { $0.hasPrefix("tr") }
+        turkishViaDictation = false
+        if !hasTR {
+            let dict = await DictationTranscriber.supportedLocales.map { $0.identifier(.bcp47) }
+            if dict.contains(where: { $0.hasPrefix("tr") }) { hasTR = true; turkishViaDictation = true }
+        }
         guard hasTR && hasEN else {
-            state = .unsupported(hasTR ? "İngilizce desteklenmiyor" : "Türkçe bu motorda desteklenmiyor")
+            state = .unsupported(hasEN ? "Türkçe desteklenmiyor" : "İngilizce desteklenmiyor")
             return
         }
-        let installed = await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) }
-        let ok = installed.contains { $0.hasPrefix("tr") } && installed.contains { $0.hasPrefix("en") }
-        state = ok ? .ready : .needsAssets
+        let enInstalled = await SpeechTranscriber.installedLocales.contains { $0.identifier(.bcp47).hasPrefix("en") }
+        let trInstalled = turkishViaDictation
+            ? await DictationTranscriber.installedLocales.contains { $0.identifier(.bcp47).hasPrefix("tr") }
+            : await SpeechTranscriber.installedLocales.contains { $0.identifier(.bcp47).hasPrefix("tr") }
+        state = (enInstalled && trInstalled) ? .ready : .needsAssets
     }
 
     @MainActor
     func install() async {
         state = .installing
         do {
-            for loc in [Self.tr, Self.en] {
-                let t = SpeechTranscriber(locale: loc, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
-                if let req = try await AssetInventory.assetInstallationRequest(supporting: [t]) {
+            for lang in [DetectedLanguage.tr, .en] {
+                let m = Self.module(for: lang, dictation: turkishViaDictation, volatile: false)
+                if let req = try await AssetInventory.assetInstallationRequest(supporting: [m]) {
                     try await req.downloadAndInstall()
                 }
             }
@@ -55,7 +75,9 @@ final class AppleSpeechSupport {
         case .unsupported(let why): "Kullanılamıyor: \(why). Whisper kullanılacak."
         case .needsAssets: "Türkçe/İngilizce dil dosyaları indirilmedi"
         case .installing: "İndiriliyor…"
-        case .ready: "Hazır · anlık yazıya dökme · çevrimdışı"
+        case .ready: turkishViaDictation
+            ? "Hazır · İngilizce: yeni motor, Türkçe: Apple Dikte · anlık · çevrimdışı"
+            : "Hazır · anlık yazıya dökme · çevrimdışı"
         case .failed(let e): "Hata: \(e)"
         }
     }
@@ -65,7 +87,6 @@ final class AppleSpeechSupport {
 final class AppleLiveTranscriber {
     private struct Lane {
         let lang: DetectedLanguage
-        let transcriber: SpeechTranscriber
         let analyzer: SpeechAnalyzer
         let input: AsyncStream<AnalyzerInput>.Continuation
         var finalText = ""
@@ -101,31 +122,28 @@ final class AppleLiveTranscriber {
         guard !running else { return }
         AudioRoute.shared.configure()
         var built: [Lane] = []
-        var modules: [SpeechTranscriber] = []
-        for l in langs {
-            let t = SpeechTranscriber(locale: l == .tr ? AppleSpeechSupport.tr : AppleSpeechSupport.en,
-                                      transcriptionOptions: [],
-                                      reportingOptions: [.volatileResults],
-                                      attributeOptions: [.transcriptionConfidence])
-            modules.append(t)
+        var modules: [any SpeechModule] = []
+        let dict = AppleSpeechSupport.shared.turkishViaDictation
+        for (i, l) in langs.enumerated() {
+            let m = AppleSpeechSupport.module(for: l, dictation: dict, volatile: true)
+            modules.append(m)
+            // sonuçları dinle (modül türüne göre)
+            if let t = m as? SpeechTranscriber {
+                tasks.append(Task { [weak self] in
+                    do { for try await r in t.results { self?.receive(lane: i, text: String(r.text.characters), isFinal: r.isFinal, conf: Self.confidence(r.text)) } } catch {}
+                })
+            } else if let t = m as? DictationTranscriber {
+                tasks.append(Task { [weak self] in
+                    do { for try await r in t.results { self?.receive(lane: i, text: String(r.text.characters), isFinal: r.isFinal, conf: Self.confidence(r.text)) } } catch {}
+                })
+            }
             let (stream, cont) = AsyncStream<AnalyzerInput>.makeStream()
-            let a = SpeechAnalyzer(modules: [t])
+            let a = SpeechAnalyzer(modules: [m])
             try await a.start(inputSequence: stream)
-            built.append(Lane(lang: l, transcriber: t, analyzer: a, input: cont))
+            built.append(Lane(lang: l, analyzer: a, input: cont))
         }
         analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules)
         lock.lock(); lanes = built; lock.unlock()
-
-        for i in built.indices {
-            let t = built[i].transcriber
-            tasks.append(Task { [weak self] in
-                do {
-                    for try await r in t.results {
-                        self?.receive(lane: i, text: String(r.text.characters), isFinal: r.isFinal, conf: Self.confidence(r.text))
-                    }
-                } catch {}
-            })
-        }
 
         let input = engine.inputNode
         let inFormat = input.outputFormat(forBus: 0)
