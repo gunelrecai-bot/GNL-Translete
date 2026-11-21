@@ -18,21 +18,21 @@ struct LLMModelInfo {
 
     static let fast = LLMModelInfo(
         tier: .fast,
-        name: "Qwen2.5-1.5B-Instruct",
+        name: "Qwen3-1.7B",
         license: "Apache 2.0",
-        fileName: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-        url: URL(string: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf")!,
-        approxBytes: 1_120_000_000,
-        note: "~1,1 GB · en hızlı cevap")
+        fileName: "Qwen3-1.7B-Q4_K_M.gguf",
+        url: URL(string: "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf")!,
+        approxBytes: 1_100_000_000,
+        note: "~1,1 GB · hızlı cevap")
 
     static let quality = LLMModelInfo(
         tier: .quality,
-        name: "Qwen2.5-3B-Instruct",
-        license: "Qwen Research (kişisel/ticari olmayan kullanım)",
-        fileName: "qwen2.5-3b-instruct-q4_k_m.gguf",
-        url: URL(string: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf")!,
-        approxBytes: 2_100_000_000,
-        note: "~2,1 GB · daha isabetli cevap, 1–2 sn daha yavaş")
+        name: "Qwen3-4B",
+        license: "Apache 2.0",
+        fileName: "Qwen3-4B-Q4_K_M.gguf",
+        url: URL(string: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf")!,
+        approxBytes: 2_400_000_000,
+        note: "~2,5 GB · en isabetli cevap, biraz daha yavaş")
 
     static func of(_ t: ModelTier) -> LLMModelInfo { t == .fast ? fast : quality }
 }
@@ -68,7 +68,17 @@ final class ModelStore: NSObject, URLSessionDownloadDelegate {
     private override init() {
         super.init()
         session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+        removeOldModels()
         refresh()
+    }
+
+    /// Eski sürümlerin (Qwen2.5) model dosyalarını sil: yer kaplamasın.
+    private func removeOldModels() {
+        let dir = fileURL(.fast).deletingLastPathComponent()
+        let keep = Set(ModelTier.allCases.map { LLMModelInfo.of($0).fileName })
+        for f in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where f.hasSuffix(".gguf") && !keep.contains(f) {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(f))
+        }
     }
 
     func refresh() {

@@ -1,7 +1,8 @@
 import Foundation
+import NaturalLanguage
 
 enum ToneKind: String, Codable, CaseIterable {
-    case joke, teasing, sarcasm, slang, rude, profanity, insult, argument, warning, threat
+    case joke, teasing, sarcasm, slang, rude, profanity, insult, argument, warning, threat, harsh
 
     var label: String {
         switch self {
@@ -15,12 +16,13 @@ enum ToneKind: String, Codable, CaseIterable {
         case .argument: "Tartışma"
         case .warning: "Sert uyarı"
         case .threat: "Tehdit"
+        case .harsh: "Sert ton"
         }
     }
     var severity: Int {
         switch self {
         case .joke, .teasing, .slang: 1
-        case .sarcasm, .argument, .rude: 2
+        case .sarcasm, .argument, .rude, .harsh: 2
         case .profanity, .insult, .warning: 3
         case .threat: 4
         }
@@ -82,9 +84,19 @@ enum ToneLexicon {
         return ToneResult(kinds: found, certain: certain)
     }
 
+    /// Apple'ın cihaz içi duygu skoru: belirgin olumsuzluk "Sert ton olabilir" olarak işaretlenir.
+    static func sentiment(_ text: String) -> ToneResult {
+        let tagger = NLTagger(tagSchemes: [.sentimentScore])
+        tagger.string = text
+        let (tag, _) = tagger.tag(at: text.startIndex, unit: .paragraph, scheme: .sentimentScore)
+        let score = Double(tag?.rawValue ?? "0") ?? 0
+        return score <= -0.6 ? ToneResult(kinds: [.harsh], certain: false) : .none
+    }
+
     static func merge(_ a: ToneResult, _ b: ToneResult) -> ToneResult {
         var kinds = a.kinds
         for k in b.kinds where !kinds.contains(k) { kinds.append(k) }
-        return ToneResult(kinds: kinds, certain: a.certain || b.certain)
+        let certain = (a.certain && !a.isEmpty) || (b.certain && !b.isEmpty) || kinds.contains { $0.severity >= 3 }
+        return ToneResult(kinds: kinds, certain: certain)
     }
 }

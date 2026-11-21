@@ -67,7 +67,11 @@ final class LlamaEngine {
             let ok = withUnsafeMutablePointer(to: &tok) { llama_decode(ctx, llama_batch_get_one($0, 1)) == 0 }
             if !ok { break }
         }
-        return String(decoding: bytes, as: UTF8.self)
+        var out = String(decoding: bytes, as: UTF8.self)
+        // Qwen3 düşünme bloğunu at
+        if let r = out.range(of: "</think>") { out = String(out[r.upperBound...]) }
+        out = out.replacingOccurrences(of: "<think>", with: "")
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func applyTemplate(_ messages: [Message]) -> String {

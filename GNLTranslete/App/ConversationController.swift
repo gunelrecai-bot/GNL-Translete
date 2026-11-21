@@ -123,7 +123,7 @@ final class ConversationController {
     // MARK: Kart oluşturma
     private func handle(_ heard: HeardTurn) async {
         var turn = ConversationTurn(heard: heard.text, heardLanguage: heard.language)
-        turn.tone = ToneLexicon.analyze(heard.text)
+        turn.tone = ToneLexicon.merge(ToneLexicon.analyze(heard.text), ToneLexicon.sentiment(heard.text))
         turn.naturalPending = heard.language == .en
         turns.append(turn)
 
@@ -145,7 +145,8 @@ final class ConversationController {
                 let nat = await ReplyGenerator.shared.naturalize(heard.text, previous: prev)
                 guard var t = self.turns.first(where: { $0.id == id }) else { return }
                 t.naturalPending = false
-                t.natural = nat ?? ""
+                t.natural = nat?.natural ?? ""
+                if let tone = nat?.tone { t.tone = ToneLexicon.merge(t.tone, tone) }
                 if nat == nil && t.status.isEmpty { t.status = ReplyGenerator.shared.loadError ?? "Dil modeli hazır değil (Ayarlar → Cevap Modeli)" }
                 self.update(t)
             }
