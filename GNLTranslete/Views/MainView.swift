@@ -92,10 +92,10 @@ struct MainView: View {
                     ForEach(convo.turns) { t in
                         TurnCard(turn: t, onSave: { saveTarget = t }).id(t.id)
                     }
-                    if convo.hearingSpeech || convo.transcribing > 0 {
+                    if convo.hearingSpeech || convo.transcribing > 0 || !convo.partial.isEmpty {
                         HStack(spacing: 8) {
                             Image(systemName: "waveform").symbolEffect(.variableColor, isActive: true)
-                            Text(convo.transcribing > 0 ? "Yazıya dökülüyor…" : "Konuşma algılandı…").italic()
+                            Text(!convo.partial.isEmpty ? convo.partial : (convo.transcribing > 0 ? "Yazıya dökülüyor…" : "Konuşma algılandı…")).italic()
                             Spacer()
                         }
                         .padding().foregroundStyle(theme.onCard.opacity(0.8))

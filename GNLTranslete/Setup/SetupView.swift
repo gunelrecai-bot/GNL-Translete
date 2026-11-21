@@ -17,6 +17,7 @@ struct SetupView: View {
     @State private var transConfig2: TranslationSession.Configuration?
     @State private var model = ModelStore.shared
     @State private var whisper = WhisperEngine.shared
+    @State private var apple = AppleSpeechSupport.shared
     @State private var checking = false
     @State private var tick = 0
 
@@ -40,7 +41,12 @@ struct SetupView: View {
                     row("Konuşma tanıma izni", ok: speechAuthOK, detail: speechAuthOK ? "Verildi" : "Gerekli") {
                         Button("İzin Ver") { Task { speechAuthOK = await ListeningEngine.requestAuth(); refresh() } }
                     }
-                    row("Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready, detail: whisperText + (tick < 0 ? "" : "")) {
+                    row("Apple konuşma motoru (Türkçe + İngilizce)", ok: apple.isReady, detail: apple.statusText) {
+                        if apple.state == .needsAssets || { if case .failed = apple.state { return true }; return false }() {
+                            Button("İndir") { Task { await apple.install(); ConversationController.shared.restartListening() } }
+                        }
+                    }
+                    row(apple.isReady ? "Yedek: Whisper (gerekmez)" : "Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready, detail: whisperText + (tick < 0 ? "" : "")) {
                         Button("İndir") { Task { await whisper.prepare() } }
                             .disabled({ switch whisper.state { case .downloading, .loading: return true; default: return false } }())
                     }
@@ -136,7 +142,7 @@ struct SetupView: View {
         }
     }
     private var essentialsReady: Bool {
-        micOK && speechAuthOK && whisper.state == .ready && transReady && model.state == .ready
+        micOK && speechAuthOK && (apple.isReady || whisper.state == .ready) && transReady && model.state == .ready
     }
     private var whisperText: String {
         switch whisper.state {
@@ -176,6 +182,7 @@ struct SetupView: View {
         speechAuthOK = SFSpeechAuthorized()
         onDevice = ListeningEngine.onDeviceStatus()
         trans = await Translator.status()
+        if apple.state == .checking { await apple.check() }
         model.refresh()
     }
 }

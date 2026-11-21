@@ -25,7 +25,21 @@ final class OneShotListener {
 
     /// Whisper ile tek söz (dil zorlanır). Cümlemi Çevir → Konuş için.
     private var recorder: UtteranceRecorder?
+    private var live: AppleLiveTranscriber?
     func listenWhisper(lang: String, timeout: TimeInterval = 20) async -> HeardTurn? {
+        if AppleSpeechSupport.shared.isReady {
+            let l = AppleLiveTranscriber(langs: [lang == "tr" ? .tr : .en])
+            l.endSilence = 1.1
+            live = l
+            let r: HeardTurn? = await withCheckedContinuation { (c: CheckedContinuation<HeardTurn?, Never>) in
+                var done = false
+                func finish(_ h: HeardTurn?) { guard !done else { return }; done = true; l.stop(); c.resume(returning: h) }
+                l.onTurn = { h in finish(h) }
+                Task { do { try await l.start() } catch { finish(nil) } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(nil) }
+            }
+            return r
+        }
         let r = UtteranceRecorder()
         r.endSilence = 1.2
         recorder = r
@@ -45,7 +59,7 @@ final class OneShotListener {
         return await WhisperEngine.shared.transcribe(samples, forced: lang)
     }
 
-    func cancel() { engine?.stop(); recorder?.stop() }
+    func cancel() { engine?.stop(); recorder?.stop(); live?.stop() }
 }
 
 struct PronunciationFeedback {

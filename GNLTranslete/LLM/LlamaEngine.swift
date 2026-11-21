@@ -21,6 +21,7 @@ final class LlamaEngine {
     }
 
     deinit {
+        if let ctx { llama_free(ctx) }
         if let model { llama_model_free(model) }
     }
 
@@ -30,27 +31,59 @@ final class LlamaEngine {
         }
     }
 
-    private func run(_ messages: [Message], maxTokens: Int, temperature: Float) -> String {
-        guard let model, let vocab else { return "" }
+    // Kalıcı bağlam + önek önbelleği: aynı talimatlar her seferinde yeniden işlenmez.
+    private var ctx: OpaquePointer?
+    private var cached: [llama_token] = []
+    private let nCtx: Int32 = 2048
+    private let nBatch: Int32 = 512
+
+    private func context() -> OpaquePointer? {
+        if let ctx { return ctx }
         var cp = llama_context_default_params()
-        cp.n_ctx = 2048          // kısa istemler için yeterli; bellek ve süre yarıya iner
-        cp.n_batch = 512
+        cp.n_ctx = UInt32(nCtx)
+        cp.n_batch = UInt32(nBatch)
         let threads = Int32(max(2, min(6, ProcessInfo.processInfo.activeProcessorCount - 2)))
         cp.n_threads = threads
         cp.n_threads_batch = threads
-        guard let ctx = llama_init_from_model(model, cp) else { return "" }
-        defer { llama_free(ctx) }
+        ctx = llama_init_from_model(model, cp)
+        cached = []
+        return ctx
+    }
 
-        // Sohbet şablonu
-        let prompt = applyTemplate(messages)
+    private func run(_ messages: [Message], maxTokens: Int, temperature: Float) -> String {
+        guard model != nil, let vocab, let ctx = context() else { return "" }
+        let mem = llama_get_memory(ctx)
+
+        var prompt = applyTemplate(messages)
+        // Qwen3: düşünme adımını atla (daha hızlı cevap)
+        prompt += "<think>\n\n</think>\n\n"
         var tokens = tokenize(prompt)
-        if tokens.count > 1800 { tokens = Array(tokens.suffix(1800)) }
         guard !tokens.isEmpty else { return "" }
+        if tokens.count > Int(nCtx) - maxTokens - 8 { tokens = Array(tokens.suffix(Int(nCtx) - maxTokens - 8)); cached = [] }
 
-        let decodeOK: Bool = tokens.withUnsafeMutableBufferPointer { p in
-            llama_decode(ctx, llama_batch_get_one(p.baseAddress, Int32(p.count))) == 0
+        // Ortak öneki bul; yalnızca farklı kısmı işle
+        var common = 0
+        while common < min(cached.count, tokens.count) && cached[common] == tokens[common] { common += 1 }
+        if common == tokens.count { common -= 1 }    // logit için en az bir belirteç işlenmeli
+        if common <= 0 {
+            llama_memory_clear(mem, true)
+            common = 0
+        } else {
+            _ = llama_memory_seq_rm(mem, 0, Int32(common), -1)
         }
-        guard decodeOK else { return "" }
+        cached = Array(tokens.prefix(common))
+
+        var pos = common
+        while pos < tokens.count {
+            let n = min(Int(nBatch), tokens.count - pos)
+            var chunk = Array(tokens[pos..<(pos + n)])
+            let ok: Bool = chunk.withUnsafeMutableBufferPointer { p in
+                llama_decode(ctx, llama_batch_get_one(p.baseAddress, Int32(n))) == 0
+            }
+            if !ok { llama_memory_clear(mem, true); cached = []; return "" }
+            cached += chunk
+            pos += n
+        }
 
         let smpl = llama_sampler_chain_init(llama_sampler_chain_default_params())
         defer { llama_sampler_free(smpl) }
@@ -66,9 +99,12 @@ final class LlamaEngine {
             bytes += piece(tok)
             let ok = withUnsafeMutablePointer(to: &tok) { llama_decode(ctx, llama_batch_get_one($0, 1)) == 0 }
             if !ok { break }
+            cached.append(tok)
+            // tek satırlık cevaplarda gereksiz devam etme
+            if bytes.count > 8, let last = String(decoding: bytes.suffix(2), as: UTF8.self).last, last == "\n",
+               String(decoding: bytes, as: UTF8.self).contains("REPLY:") { break }
         }
         var out = String(decoding: bytes, as: UTF8.self)
-        // Qwen3 düşünme bloğunu at
         if let r = out.range(of: "</think>") { out = String(out[r.upperBound...]) }
         out = out.replacingOccurrences(of: "<think>", with: "")
         return out.trimmingCharacters(in: .whitespacesAndNewlines)

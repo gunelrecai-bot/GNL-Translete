@@ -42,8 +42,13 @@ struct RootView: View {
         .environment(\.theme, theme)
         .tint(theme.accent)
         .task {
-            // indirilmiş Whisper modelini belleğe yükle
-            if WhisperEngine.shared.isDownloaded { await WhisperEngine.shared.prepare() }
+            // Önce Apple motorunu dene; yoksa indirilmiş Whisper'ı yükle
+            await AppleSpeechSupport.shared.check()
+            if AppleSpeechSupport.shared.isReady {
+                ConversationController.shared.restartListening()
+            } else if WhisperEngine.shared.isDownloaded {
+                await WhisperEngine.shared.prepare()
+            }
         }
         .onChange(of: phase) { _, p in
             // arka plana geçişte bağlam korunur; geri gelince ses listesi yenilenir

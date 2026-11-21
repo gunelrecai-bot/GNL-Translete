@@ -27,6 +27,10 @@ final class ConversationController {
     private(set) var lastOwnEnglish: String?
 
     private let recorder = UtteranceRecorder()
+    private let live = AppleLiveTranscriber()
+    private(set) var partial = ""
+    /// Apple'ın yeni motoru hazırsa o, değilse Whisper kullanılır.
+    var usesApple: Bool { AppleSpeechSupport.shared.isReady }
     private let speech = SpeechOutput.shared
     private let route = AudioRoute.shared
     private var queue: [[Float]] = []
@@ -38,6 +42,13 @@ final class ConversationController {
         recorder.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
         recorder.onLevel = { [weak self] l, s in self?.level = l; self?.hearingSpeech = s }
         recorder.onUtterance = { [weak self] samples in self?.enqueue(samples) }
+        live.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
+        live.onLevel = { [weak self] l, s in self?.level = l; self?.hearingSpeech = s }
+        live.onPartial = { [weak self] t in self?.partial = t }
+        live.onTurn = { [weak self] heard in
+            self?.partial = ""
+            Task { await self?.handle(heard) }
+        }
         route.onHeadphonesChanged = { [weak self] on in
             if !on { self?.speech.pauseForHeadphones() }
         }
@@ -46,7 +57,7 @@ final class ConversationController {
     var statusLine: String {
         let l: String
         if !AppSettings.shared.setupComplete { l = "Kurulum bekleniyor" }
-        else if WhisperEngine.shared.state != .ready { l = "Konuşma modeli hazırlanıyor" }
+        else if !usesApple && WhisperEngine.shared.state != .ready { l = "Konuşma modeli hazırlanıyor" }
         else if userPaused { l = "Duraklatıldı" }
         else if overlayPauses > 0 { l = "Dinleme beklemede" }
         else if transcribing > 0 { l = "Yazıya dökülüyor…" }
@@ -59,19 +70,39 @@ final class ConversationController {
     // MARK: Dinleme denetimi
     func startIfAllowed() {
         guard AppSettings.shared.setupComplete, !userPaused, overlayPauses == 0, !listening else { return }
-        do {
-            try recorder.start()
-            listening = true
-            errorText = nil
-        } catch {
-            errorText = "Mikrofon başlatılamadı: \(error.localizedDescription)"
+        listening = true
+        errorText = nil
+        if usesApple {
+            Task {
+                do { try await live.start() }
+                catch {
+                    // Apple motoru açılamazsa Whisper'a dön
+                    errorText = "Apple konuşma motoru açılamadı, Whisper kullanılıyor (\(error.localizedDescription))"
+                    do { try recorder.start() } catch { listening = false }
+                }
+            }
+        } else {
+            do { try recorder.start() }
+            catch {
+                listening = false
+                errorText = "Mikrofon başlatılamadı: \(error.localizedDescription)"
+            }
         }
     }
 
     private func stopListening() {
         recorder.stop()
+        live.stop()
+        partial = ""
         listening = false
         hearingSpeech = false
+    }
+
+    /// Motor değişince (Apple hazır olunca) dinlemeyi yeniden başlat.
+    func restartListening() {
+        guard listening else { startIfAllowed(); return }
+        stopListening()
+        startIfAllowed()
     }
 
     func togglePause() {
