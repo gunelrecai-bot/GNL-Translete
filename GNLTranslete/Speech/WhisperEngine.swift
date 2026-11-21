@@ -95,16 +95,23 @@ final class WhisperEngine {
             loadStarted = Date()
             stage = "Model dosyaları açılıyor"
             let started = loadStarted
-            // 4 dakikayı geçerse takıldı say ve kullanıcıya küçük modeli öner
+            // Turbo, Neural Engine'de çok daha hızlı yazar; ancak ilk açılışta bir kez derlenir (birkaç dakika).
+            // Derleme takılırsa bir sonraki denemede GPU'ya düşülür.
+            let turboKey = "turboANE-ok"
+            let turboGPU = d.bool(forKey: "turboGPU")
+            let firstCompile = size == .turbo && !turboGPU && !d.bool(forKey: turboKey)
+            if firstCompile { stage = "İlk hazırlama: Neural Engine için derleniyor (yalnızca bir kez, 3–8 dk)" }
+            let limit: Double = firstCompile ? 600 : 240
             Task { @MainActor in
-                try? await Task.sleep(for: .seconds(240))
+                try? await Task.sleep(for: .seconds(limit))
                 if self.state == .loading, self.loadStarted == started {
-                    self.state = .failed("Hazırlama 4 dakikayı geçti (aşama: \(self.stage)). Uygulamayı kapatıp açmayı ya da Small modeli deneyin.")
+                    if firstCompile { self.d.set(true, forKey: "turboGPU") }
+                    self.state = .failed("Hazırlama \(Int(limit / 60)) dakikayı geçti. Uygulamayı kapatıp açın; Turbo bir sonraki sefer GPU ile açılacak. İsterseniz Small'a dönün.")
                 }
             }
             // Kodlayıcı GPU'da: Neural Engine'in ilk seferdeki uzun derleme beklemesine takılmasın.
             let compute = size == .turbo
-                ? ModelComputeOptions(audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndNeuralEngine)
+                ? ModelComputeOptions(audioEncoderCompute: turboGPU ? .cpuAndGPU : .cpuAndNeuralEngine, textDecoderCompute: .cpuAndNeuralEngine)
                 : ModelComputeOptions(audioEncoderCompute: .cpuAndNeuralEngine, textDecoderCompute: .cpuAndNeuralEngine)
             let config = WhisperKitConfig(modelFolder: folder!.path, tokenizerFolder: base, computeOptions: compute,
                                           verbose: false, prewarm: false, load: false, download: false)
@@ -115,6 +122,7 @@ final class WhisperEngine {
             stage = "Model yükleniyor"
             try await p.loadModels()
             pipe = p
+            if size == .turbo && !turboGPU { d.set(true, forKey: turboKey) }
             state = .ready
             stage = "Hazır"
         } catch {
@@ -158,7 +166,8 @@ final class WhisperEngine {
     }
 
     private func run(_ pipe: WhisperKit, _ samples: [Float], lang: String?) async throws -> (text: String?, lang: String, conf: Float) {
-        let opts = DecodingOptions(task: .transcribe, language: lang, temperature: 0,
+        // Yeniden deneme (sıcaklık yükseltme) kapalı: tek seferde sonuç, belirgin hız kazancı
+        let opts = DecodingOptions(task: .transcribe, language: lang, temperature: 0, temperatureFallbackCount: 0,
                                    usePrefillPrompt: lang != nil, detectLanguage: lang == nil,
                                    skipSpecialTokens: true, withoutTimestamps: true)
         let results = try await pipe.transcribe(audioArray: samples, decodeOptions: opts)
@@ -224,7 +233,7 @@ final class UtteranceRecorder {
     private(set) var running = false
 
     /// Sıra sonu için gereken sessizlik (sn) — doğal duraksamada erken bölmemek için.
-    var endSilence: Double = 1.0
+    var endSilence: Double = 0.8
     var maxUtterance: Double = 28
 
     func start() throws {
