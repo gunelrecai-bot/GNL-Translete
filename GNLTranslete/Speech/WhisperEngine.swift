@@ -14,6 +14,8 @@ final class WhisperEngine {
 
     enum State: Equatable { case missing, downloading(Double), loading, ready, failed(String) }
     private(set) var state: State = .missing
+    private(set) var loadStarted: Date?
+    private var preparing = false
     private var pipe: WhisperKit?
     private let d = UserDefaults.standard
 
@@ -34,8 +36,10 @@ final class WhisperEngine {
     /// İndir (gerekirse) ve belleğe yükle.
     @MainActor
     func prepare() async {
-        if case .downloading = state { return }
+        if preparing { return }
         if state == .ready, pipe != nil { return }
+        preparing = true
+        defer { preparing = false }
         do {
             var folder = savedFolder
             if folder == nil || !isDownloaded {
@@ -47,7 +51,10 @@ final class WhisperEngine {
                 savedFolder = url.path
             }
             state = .loading
-            let config = WhisperKitConfig(modelFolder: folder, verbose: false, prewarm: true, load: true, download: false)
+            loadStarted = Date()
+            // Kodlayıcı GPU'da: Neural Engine'in ilk seferdeki uzun derleme beklemesine takılmasın.
+            let compute = ModelComputeOptions(audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndNeuralEngine)
+            let config = WhisperKitConfig(modelFolder: folder, computeOptions: compute, verbose: false, prewarm: false, load: true, download: false)
             pipe = try await WhisperKit(config)
             state = .ready
         } catch {

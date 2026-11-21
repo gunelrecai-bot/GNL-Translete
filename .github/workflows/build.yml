@@ -80,4 +80,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" GNL-Translete.ipa --title "GNL-Translete $TAG" --notes "Otomatik derleme. AltStore ile yükleyin."
+          gh release create "$TAG" GNL-Translete.ipa --title "GNL-Translete $TAG" --notes "GNL-Canlı Çeviri — otomatik derleme. AltStore ile yükleyin." --latest

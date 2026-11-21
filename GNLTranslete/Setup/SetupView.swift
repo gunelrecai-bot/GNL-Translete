@@ -18,6 +18,7 @@ struct SetupView: View {
     @State private var model = ModelStore.shared
     @State private var whisper = WhisperEngine.shared
     @State private var checking = false
+    @State private var tick = 0
 
     var body: some View {
         NavigationStack {
@@ -27,7 +28,7 @@ struct SetupView: View {
                         HStack(spacing: 12) {
                             Image("Logo").resizable().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading) {
-                                Text("GNL-Translete").font(.title2.bold())
+                                Text("GNL-Canlı Çeviri").font(.title2.bold())
                                 Text("İlk kurulum · İnternet yalnızca bu indirmeler için kullanılır.").font(.footnote).opacity(0.8)
                             }
                         }.foregroundStyle(theme.onBg)
@@ -39,7 +40,7 @@ struct SetupView: View {
                     row("Konuşma tanıma izni", ok: speechAuthOK, detail: speechAuthOK ? "Verildi" : "Gerekli") {
                         Button("İzin Ver") { Task { speechAuthOK = await ListeningEngine.requestAuth(); refresh() } }
                     }
-                    row("Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready, detail: whisperText) {
+                    row("Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready, detail: whisperText + (tick < 0 ? "" : "")) {
                         Button("İndir") { Task { await whisper.prepare() } }
                             .disabled({ switch whisper.state { case .downloading, .loading: return true; default: return false } }())
                     }
@@ -101,6 +102,7 @@ struct SetupView: View {
             // Ayarlar'dan dil indirildiğinde de durum kendiliğinden güncellensin
             while !Task.isCancelled {
                 await refreshAsync()
+                tick += 1
                 try? await Task.sleep(for: .seconds(3))
             }
         }
@@ -129,7 +131,8 @@ struct SetupView: View {
         case .ready: "Whisper large-v3 turbo · MIT · kurulu, çevrimdışı"
         case .missing: "Whisper large-v3 turbo · MIT · \(whisper.approxSize), indirilmedi. Türkçe/İngilizce ayrımı ve dağınık konuşmada çok daha isabetli."
         case .downloading(let p): "İndiriliyor %\(Int(p * 100))"
-        case .loading: "Hazırlanıyor… (ilk seferde 1–2 dakika sürebilir)"
+        case .loading:
+            "Hazırlanıyor… \(Int(Date().timeIntervalSince(whisper.loadStarted ?? Date())))  sn. İlk seferde birkaç dakika sürebilir; uygulamadan çıkma."
         case .failed(let e): "Hata: \(e)"
         }
     }

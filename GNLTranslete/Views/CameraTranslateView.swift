@@ -14,7 +14,7 @@ struct CameraTranslateView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "camera.badge.ellipsis").font(.largeTitle)
                     Text(DataScannerViewController.isSupported
-                         ? "Kamera izni gerekli: Ayarlar → GNL-Translete → Kamera"
+                         ? "Kamera izni gerekli: Ayarlar → GNL-Canlı Çeviri → Kamera"
                          : "Bu cihazda canlı yazı tanıma desteklenmiyor.")
                         .multilineTextAlignment(.center)
                 }

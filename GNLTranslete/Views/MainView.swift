@@ -47,7 +47,7 @@ struct MainView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Image("Logo").resizable().frame(width: 40, height: 40).clipShape(RoundedRectangle(cornerRadius: 10))
-            Text("GNL-Translete").font(.title2.bold()).foregroundStyle(theme.onBg)
+            Text("GNL-Canlı Çeviri").font(.title2.bold()).foregroundStyle(theme.onBg)
             Spacer()
             Button { showMenu = true } label: {
                 Image(systemName: "line.3.horizontal").font(.title2).foregroundStyle(theme.onBg)
