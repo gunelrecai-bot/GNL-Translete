@@ -42,10 +42,7 @@ struct RootView: View {
         .environment(\.theme, theme)
         .tint(theme.accent)
         .task {
-            // Eski sürümlerden kalan Whisper dosyalarını sil (yer kaplamasın)
-            let old = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Whisper")
-            try? FileManager.default.removeItem(at: old)
-            // Apple motorunu kontrol et; hazırsa onunla dinle, değilse yerleşik tanıyıcı
+            // Apple motoru hazırsa Whisper hiç belleğe alınmaz; yalnızca yedek olarak diskte bekler
             await AppleSpeechSupport.shared.check()
             ConversationController.shared.restartListening()
         }
