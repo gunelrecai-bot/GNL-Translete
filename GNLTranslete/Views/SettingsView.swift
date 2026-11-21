@@ -9,6 +9,15 @@ struct SettingsView: View {
         List {
             NavigationLink { AppearanceSettingsView() } label: { Label("Görünüm", systemImage: "paintpalette") }
             NavigationLink { VoiceSettingsView() } label: { Label("Ses ve Konuşma", systemImage: "speaker.wave.2") }
+            Section {
+                Picker("Konuşma motoru", selection: $s.speechEngine) {
+                    ForEach(SpeechEngineChoice.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline).labelsHidden()
+                .onChange(of: settings.speechEngine) { _, _ in ConversationController.shared.restartListening() }
+            } header: { Text("Konuşma Motoru") } footer: {
+                Text("Apple: konuşurken anlık yazar, telefona yük bindirmez. Whisper: cümle bitince yazar; hafif Small sürümü telefonun yapay zekâ çipinde çalışır ve yalnızca bu seçenek açıkken belleğe yüklenir, uygulamadan çıkınca bellekten silinir. İlk seçimde ~220 MB iner.")
+            }
             ModelTierSection()
             Section {
                 Toggle("Hafif mod (önerilen)", isOn: $s.lightMode)

@@ -32,7 +32,7 @@ final class ConversationController {
     private let live = AppleLiveTranscriber()
     private(set) var partial = ""
     /// Apple'ın yeni motoru hazırsa o, değilse Whisper kullanılır.
-    var usesApple: Bool { AppleSpeechSupport.shared.isReady }
+    var usesApple: Bool { AppleSpeechSupport.shared.isReady && AppSettings.shared.speechEngine == .apple }
     private let speech = SpeechOutput.shared
     private let route = AudioRoute.shared
     private var queue: [[Float]] = []
@@ -66,7 +66,8 @@ final class ConversationController {
     var statusLine: String {
         let l: String
         if !AppSettings.shared.setupComplete { l = "Kurulum bekleniyor" }
-        else if !usesApple && WhisperEngine.shared.state == .loading { l = "Yedek konuşma modeli hazırlanıyor" }
+        else if !usesApple && WhisperEngine.shared.state == .loading { l = "Whisper hazırlanıyor" }
+        else if !usesApple, case .downloading(let p) = WhisperEngine.shared.state { l = "Whisper iniyor %\(Int(p * 100))" }
         else if userPaused { l = "Duraklatıldı" }
         else if overlayPauses > 0 { l = "Dinleme beklemede" }
         else if transcribing > 0 { l = "Yazıya dökülüyor…" }
@@ -91,10 +92,10 @@ final class ConversationController {
         }
     }
 
-    /// Yedek sırası: 1) Whisper (indirildiyse; ancak gerekince belleğe yüklenir) 2) iPhone'un yerleşik tanıyıcısı
+    /// Whisper seçiliyse ya da Apple yoksa: 1) Whisper 2) iPhone'un yerleşik tanıyıcısı
     private func startBackup() async {
         let w = WhisperEngine.shared
-        if w.isDownloaded {
+        if w.isDownloaded || AppSettings.shared.speechEngine == .whisper {
             if w.state != .ready { await w.prepare() }
             if w.state == .ready, (try? recorder.start()) != nil { return }
         }
@@ -106,6 +107,8 @@ final class ConversationController {
         recorder.stop()
         fallback.stop()
         live.stop()
+        // Apple'a dönüldüyse Whisper'ı bellekten çıkar
+        if usesApple { WhisperEngine.shared.unload() }
         partial = ""
         listening = false
         hearingSpeech = false
