@@ -158,7 +158,8 @@ final class AppleLiveTranscriber {
     }
 
     func stop() {
-        guard running else { return }
+        lock.lock(); let hasLanes = !lanes.isEmpty; lock.unlock()
+        guard running || hasLanes else { return }   // başlatma yarıdayken de durdurulabilsin
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         lock.lock()

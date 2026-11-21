@@ -98,32 +98,47 @@ final class ConversationController {
     }
 
     // MARK: Dinleme denetimi
+    /// Her başlat/durdur işleminde artar; geç kalan eski başlatmalar kendini iptal eder
+    /// (motor değiştirirken mikrofonun iki motorda birden kalıp takılmasını önler).
+    private var startToken = 0
+
     func startIfAllowed() {
         guard AppSettings.shared.setupComplete, !userPaused, overlayPauses == 0, !listening else { return }
         listening = true
         errorText = nil
+        startToken += 1
+        let tok = startToken
         if usesApple {
             Task {
-                do { try await live.start() }
-                catch { errorText = "Apple konuşma motoru açılamadı, yedek kullanılıyor"; await startBackup() }
+                do {
+                    try await live.start()
+                    if tok != startToken { live.stop() }   // bu arada durduruldu ya da motor değişti
+                } catch {
+                    guard tok == startToken else { return }
+                    errorText = "Apple konuşma motoru açılamadı, yedek kullanılıyor"
+                    await startBackup(tok)
+                }
             }
         } else {
-            Task { await startBackup() }
+            Task { await startBackup(tok) }
         }
     }
 
     /// Whisper seçiliyse ya da Apple yoksa: 1) Whisper 2) iPhone'un yerleşik tanıyıcısı
-    private func startBackup() async {
+    private func startBackup(_ tok: Int) async {
         let w = WhisperEngine.shared
         if w.isDownloaded || AppSettings.shared.speechEngine == .whisper {
             if w.state != .ready { await w.prepare() }
+            guard tok == startToken else { return }
             if w.state == .ready, (try? recorder.start()) != nil { return }
         }
+        guard tok == startToken else { return }
         do { try fallback.start() }
         catch { listening = false; errorText = "Mikrofon başlatılamadı: \(error.localizedDescription)" }
     }
 
     private func stopListening() {
+        startToken += 1
         recorder.stop()
         fallback.stop()
         live.stop()
