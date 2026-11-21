@@ -16,6 +16,7 @@ struct SetupView: View {
     @State private var transConfig: TranslationSession.Configuration?
     @State private var transConfig2: TranslationSession.Configuration?
     @State private var model = ModelStore.shared
+    @State private var whisper = WhisperEngine.shared
     @State private var checking = false
 
     var body: some View {
@@ -38,8 +39,12 @@ struct SetupView: View {
                     row("Konuşma tanıma izni", ok: speechAuthOK, detail: speechAuthOK ? "Verildi" : "Gerekli") {
                         Button("İzin Ver") { Task { speechAuthOK = await ListeningEngine.requestAuth(); refresh() } }
                     }
+                    row("Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready, detail: whisperText) {
+                        Button("İndir") { Task { await whisper.prepare() } }
+                            .disabled({ switch whisper.state { case .downloading, .loading: return true; default: return false } }())
+                    }
                     ForEach(onDevice, id: \.locale) { s in
-                        row("Cihaz içi konuşma tanıma (\(s.locale == "tr-TR" ? "Türkçe" : "İngilizce"))", ok: s.ready,
+                        row("Telaffuz kontrolü için iPhone tanıyıcısı (\(s.locale == "tr-TR" ? "Türkçe" : "İngilizce"))", ok: s.ready,
                             detail: s.ready ? "Hazır, çevrimdışı" : "Eksik: Ayarlar → Genel → Klavye → Dikte'yi açın ve klavyelere \(s.locale == "tr-TR" ? "Türkçe" : "English (US)") ekleyin. iPhone dil dosyasını kendisi indirir.") { EmptyView() }
                     }
                     row("Çeviri dil paketi (Türkçe ⇄ İngilizce)", ok: transReady,
@@ -117,7 +122,16 @@ struct SetupView: View {
         }
     }
     private var essentialsReady: Bool {
-        micOK && speechAuthOK && onDevice.allSatisfy(\.ready) && transReady && model.state == .ready
+        micOK && speechAuthOK && whisper.state == .ready && transReady && model.state == .ready
+    }
+    private var whisperText: String {
+        switch whisper.state {
+        case .ready: "Whisper large-v3 turbo · MIT · kurulu, çevrimdışı"
+        case .missing: "Whisper large-v3 turbo · MIT · \(whisper.approxSize), indirilmedi. Türkçe/İngilizce ayrımı ve dağınık konuşmada çok daha isabetli."
+        case .downloading(let p): "İndiriliyor %\(Int(p * 100))"
+        case .loading: "Hazırlanıyor… (ilk seferde 1–2 dakika sürebilir)"
+        case .failed(let e): "Hata: \(e)"
+        }
     }
 
     private func row<B: View>(_ title: String, ok: Bool, detail: String, @ViewBuilder action: () -> B) -> some View {

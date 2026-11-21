@@ -3,11 +3,9 @@ import Foundation
 struct ReplyResult {
     var reply: String
     var tone: ToneResult
-    var topic: String   // devam / bağlantılı / yeni / eski konuya dönüş
-    var natural: String = ""  // son sözün doğal İngilizce karşılığı
 }
 
-/// Sohbet bağlamına göre kullanıcının söyleyebileceği doğal İngilizce cevabı üretir.
+/// Cihaz içi dil modeli: doğal İngilizce karşılık ve "Cevap Ver" önerisi.
 final class ReplyGenerator {
     static let shared = ReplyGenerator()
     private var engine: LlamaEngine?
@@ -26,69 +24,103 @@ final class ReplyGenerator {
         catch { loadError = error.localizedDescription; loadedTier = nil }
     }
 
-    func unload() { engine = nil }
+    func unload() { engine = nil; loadedTier = nil }
 
-    struct ContextTurn { let speaker: String; let english: String }
+    struct ContextTurn { let english: String }
 
-    func generate(history: [ContextTurn], latestEnglish: String, mode: ConversationMode, hint: String?) async -> ReplyResult? {
+    // MARK: Doğal İngilizce
+    /// Duyulan (bozuk, eksik, aksanlı olabilir) İngilizceyi aynı anlam ve sertlikte doğal İngilizceye çevirir.
+    func naturalize(_ heard: String, previous: [ContextTurn]) async -> String? {
+        loadIfNeeded()
+        guard let engine else { return nil }
+        let system = """
+        You rewrite spoken English into natural, correct English.
+        The input may be broken, accented, incomplete or wrongly transcribed. Keep the same meaning and the same tone (polite, rude, joking...).
+        If words are missing, add only what is obviously meant. Do not answer it, do not explain. Output ONLY the rewritten sentence.
+        Examples:
+        going to school -> I'm going to school.
+        sorry we full tonight -> Sorry, we're fully booked tonight.
+        you want window seat yes -> Would you like a window seat?
+        """
+        var user = ""
+        if let last = previous.last { user += "Previous line (context only): \(last.english)\n" }
+        user += "Rewrite: \(heard)"
+        let words = heard.split(separator: " ").count
+        let raw = await engine.generate([.init(role: "system", content: system), .init(role: "user", content: user)],
+                                        maxTokens: min(90, 20 + words * 4), temperature: 0.2)
+        var t = raw.components(separatedBy: .newlines).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        if let r = t.range(of: "->") { t = String(t[r.upperBound...]) }
+        t = t.replacingOccurrences(of: "Rewrite:", with: "")
+        t = t.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”<>[] ").union(.whitespaces))
+        return t.isEmpty ? nil : t
+    }
+
+    // MARK: Cevap Ver
+    /// Kullanıcının seçtiği söze (kendisinin ya da karşıdakinin) sohbetin doğal devamı olacak cevabı üretir.
+    func reply(to line: String, history: [ContextTurn], mode: ConversationMode, hint: String?) async -> ReplyResult? {
         loadIfNeeded()
         guard let engine else { return nil }
 
         let modeText = mode == .home
-            ? "The user is at home talking with family. Speech may mix Turkish and English."
-            : "The user is travelling and talking with native and non-native English speakers. The other person's English may be accented, incomplete or ungrammatical; interpret it from context."
+            ? "The user is at home talking with family; Turkish and English are mixed."
+            : "The user is travelling and talking with native and non-native English speakers."
 
         let system = """
-        You help a Turkish speaker reply in spoken English. \(modeText)
-        Write ONE natural reply the user can say out loud, using simple, common words.
-        Match the length to the latest line: a short or incomplete line gets a short reply (one short sentence or a short question). Never write a long reply to a short line.
-        If the latest line is unclear or incomplete, guess the most likely meaning in NATURAL and reply briefly, or ask one short clarifying question.
-        If the last line is not a question, suggest a fitting reaction or a follow-up question.
-        Never invent the user's preferences or facts that were not said. If needed, offer options ("Either is fine" / "Maybe A or B?") or a short clarification question in English.
-        Keep the reply calm and appropriate even if the other person is rude.
+        You help a Turkish speaker continue a spoken conversation in English. \(modeText)
+        The user picked one line of the conversation. It may have been said by the other person or by the user. It may be a question, a statement, or an incomplete or badly transcribed sentence.
+        Suggest the ONE next thing the user could naturally say in response to that line, in simple, common English.
+        Match the length to the line: a short line gets one short sentence. Never write a long reply to a short line.
+        Never invent facts or preferences that were not said; if needed, offer simple options or ask one short question.
+        Stay calm and polite even if the line is rude.
         Answer in exactly this format:
-        TOPIC: continue | related | new | return
         TONE: none or comma list of joke, teasing, sarcasm, slang, rude, profanity, insult, argument, warning, threat
-        SURE: yes | no
-        NATURAL: the latest line rewritten as natural, correct English with the same meaning and the same strength
-        REPLY: the English reply, plain text, no brackets or quotes
+        REPLY: the English sentence, plain text, no quotes or brackets
+
         Examples:
-        Latest line: going to school
-        TOPIC: continue
+        Line: I'm going to school.
         TONE: none
-        SURE: yes
-        NATURAL: I'm going to school.
         REPLY: Oh, nice. Have a good day!
 
-        Latest line: Would you like a window seat?
-        TOPIC: continue
+        Line: Would you like a window seat?
         TONE: none
-        SURE: yes
-        NATURAL: Would you like a window seat?
         REPLY: Yes, please. That would be great.
 
-        Latest line: sorry we full tonight
-        TOPIC: new
+        Line: Sorry, we're fully booked tonight.
         TONE: none
-        SURE: yes
-        NATURAL: Sorry, we're fully booked tonight.
         REPLY: Oh, I see. Is there another hotel nearby?
-
-        Reply ONLY to the latest line. Use earlier lines just as background; never quote or repeat them unless the latest line refers to them.
         """
 
-        var convo = "Conversation so far (oldest first):\n"
-        for t in history.suffix(20) { convo += "\(t.speaker): \(t.english)\n" }
-        convo += "\nLatest line from the other person: \(latestEnglish)\n"
-        if let hint, !hint.isEmpty { convo += "The user's own direction for the reply (Turkish): \(hint)\n" }
+        var user = ""
+        let ctx = history.suffix(20)
+        if !ctx.isEmpty {
+            user += "Earlier conversation (background only, oldest first):\n"
+            for t in ctx { user += "- \(t.english)\n" }
+            user += "\n"
+        }
+        user += "Line: \(line)\n"
+        if let hint, !hint.isEmpty { user += "The user's own direction for the reply (Turkish): \(hint)\n" }
 
-        // Uzunluk konuşmaya göre: kısa söze kısa cevap
-        let inWords = latestEnglish.split(separator: " ").count
-        let budget = min(160, 70 + inWords * 6)
-        let raw = await engine.generate([.init(role: "system", content: system), .init(role: "user", content: convo)], maxTokens: budget, temperature: 0.3)
+        let words = line.split(separator: " ").count
+        let raw = await engine.generate([.init(role: "system", content: system), .init(role: "user", content: user)],
+                                        maxTokens: min(140, 50 + words * 6), temperature: 0.3)
         guard var r = Self.parse(raw) else { return nil }
-        if inWords <= 5 { r.reply = Self.firstSentences(r.reply, max: 2, maxWords: 16) }
+        if words <= 5 { r.reply = Self.firstSentences(r.reply, max: 2, maxWords: 16) }
         return r
+    }
+
+    static func parse(_ raw: String) -> ReplyResult? {
+        var reply = "", toneLine = "none"
+        for line in raw.components(separatedBy: .newlines) {
+            let l = line.trimmingCharacters(in: .whitespaces)
+            if l.uppercased().hasPrefix("REPLY:") { reply = String(l.dropFirst(6)) }
+            else if l.uppercased().hasPrefix("TONE:") { toneLine = String(l.dropFirst(5)).lowercased() }
+            else if !reply.isEmpty && !l.isEmpty && !l.uppercased().hasPrefix("LINE:") { reply += " " + l }
+        }
+        if reply.isEmpty { reply = raw.components(separatedBy: .newlines).last { !$0.isEmpty } ?? "" }
+        reply = reply.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”<>[] ").union(.whitespaces))
+        guard !reply.isEmpty else { return nil }
+        let kinds = ToneKind.allCases.filter { toneLine.contains($0.rawValue) }
+        return ReplyResult(reply: reply, tone: ToneResult(kinds: kinds, certain: kinds.contains { $0.severity >= 3 }))
     }
 
     /// Kısa sözlere gelen uzun cevapları ilk cümle(ler)de keser.
@@ -105,26 +137,5 @@ final class ReplyGenerator {
         }
         if out.isEmpty { return text }
         return out.joined(separator: " ")
-    }
-
-    static func parse(_ raw: String) -> ReplyResult? {
-        var reply = "", topic = "continue", toneLine = "none", sure = true, natural = ""
-        for line in raw.components(separatedBy: .newlines) {
-            let l = line.trimmingCharacters(in: .whitespaces)
-            if l.uppercased().hasPrefix("REPLY:") { reply = String(l.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
-            else if l.uppercased().hasPrefix("TOPIC:") { topic = String(l.dropFirst(6)).trimmingCharacters(in: .whitespaces).lowercased() }
-            else if l.uppercased().hasPrefix("TONE:") { toneLine = String(l.dropFirst(5)).lowercased() }
-            else if l.uppercased().hasPrefix("NATURAL:") { natural = String(l.dropFirst(8)).trimmingCharacters(in: .whitespaces) }
-            else if l.uppercased().hasPrefix("SURE:") { sure = l.lowercased().contains("yes") }
-            else if !reply.isEmpty && !l.isEmpty { reply += " " + l }   // çok satırlı cevap
-        }
-        if reply.isEmpty {
-            reply = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        reply = reply.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”<>[] "))
-        natural = natural.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”<>[] "))
-        guard !reply.isEmpty else { return nil }
-        let kinds = ToneKind.allCases.filter { toneLine.contains($0.rawValue) }
-        return ReplyResult(reply: reply, tone: ToneResult(kinds: kinds, certain: sure), topic: topic, natural: natural)
     }
 }

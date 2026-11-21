@@ -23,7 +23,29 @@ final class OneShotListener {
         }
     }
 
-    func cancel() { engine?.stop() }
+    /// Whisper ile tek söz (dil zorlanır). Cümlemi Çevir → Konuş için.
+    private var recorder: UtteranceRecorder?
+    func listenWhisper(lang: String, timeout: TimeInterval = 20) async -> HeardTurn? {
+        let r = UtteranceRecorder()
+        r.endSilence = 1.2
+        recorder = r
+        let samples: [Float]? = await withCheckedContinuation { (c: CheckedContinuation<[Float]?, Never>) in
+            var done = false
+            func finish(_ s: [Float]?) {
+                guard !done else { return }
+                done = true
+                r.stop()
+                c.resume(returning: s)
+            }
+            r.onUtterance = { s in finish(s) }
+            do { try r.start() } catch { finish(nil); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(nil) }
+        }
+        guard let samples else { return nil }
+        return await WhisperEngine.shared.transcribe(samples, forced: lang)
+    }
+
+    func cancel() { engine?.stop(); recorder?.stop() }
 }
 
 struct PronunciationFeedback {

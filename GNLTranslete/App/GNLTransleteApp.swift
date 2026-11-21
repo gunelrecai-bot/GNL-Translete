@@ -41,6 +41,10 @@ struct RootView: View {
         }
         .environment(\.theme, theme)
         .tint(theme.accent)
+        .task {
+            // indirilmiş Whisper modelini belleğe yükle
+            if WhisperEngine.shared.isDownloaded { await WhisperEngine.shared.prepare() }
+        }
         .onChange(of: phase) { _, p in
             // arka plana geçişte bağlam korunur; geri gelince ses listesi yenilenir
             if p == .active { AudioRoute.shared.refresh() }

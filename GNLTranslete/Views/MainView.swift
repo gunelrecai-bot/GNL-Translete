@@ -31,7 +31,7 @@ struct MainView: View {
         .sheet(isPresented: $showMenu) { MenuView() }
         .sheet(isPresented: $showTranslateMine) { TranslateMineView() }
         .sheet(item: $saveTarget) { t in
-            FolderPickerView(english: t.suggestion, turkish: t.suggestionTR)
+            FolderPickerView(english: t.reply, turkish: t.replyTR)
         }
         .fullScreenCover(isPresented: $showCamera, onDismiss: { convo.endOverlay() }) {
             CameraTranslateView()
@@ -85,17 +85,17 @@ struct MainView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    if convo.turns.isEmpty && convo.partial.isEmpty {
-                        Text(convo.listening ? "Dinliyorum… Karşındaki kişi konuşmaya başlayabilir." : "Dinleme beklemede.")
+                    if convo.turns.isEmpty {
+                        Text(convo.listening ? "Dinliyorum… Konuşulanlar burada kart olarak görünecek." : "Dinleme beklemede.")
                             .foregroundStyle(theme.onBg.opacity(0.7)).padding(.top, 40)
                     }
                     ForEach(convo.turns) { t in
                         TurnCard(turn: t, onSave: { saveTarget = t }).id(t.id)
                     }
-                    if !convo.partial.isEmpty {
-                        HStack {
-                            Image(systemName: "waveform")
-                            Text(convo.partial).italic()
+                    if convo.hearingSpeech || convo.transcribing > 0 {
+                        HStack(spacing: 8) {
+                            Image(systemName: "waveform").symbolEffect(.variableColor, isActive: true)
+                            Text(convo.transcribing > 0 ? "Yazıya dökülüyor…" : "Konuşma algılandı…").italic()
                             Spacer()
                         }
                         .padding().foregroundStyle(theme.onCard.opacity(0.8))
@@ -162,74 +162,85 @@ struct TurnCard: View {
     let turn: ConversationTurn
     var onSave: () -> Void
     @Environment(\.theme) private var theme
+    private var c: ConversationController { ConversationController.shared }
 
     var body: some View {
-        VStack(spacing: 10) {
-            if !turn.tone.isEmpty {
-                Label(turn.tone.shortWarning, systemImage: "exclamationmark.bubble")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.orange.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-                    .foregroundStyle(theme.onCard)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: turn.isOwnTranslation ? "person.wave.2" : "waveform")
+                Text(turn.isOwnTranslation ? "Cümlem" : (turn.heardLanguage == .en ? "İngilizce" : "Türkçe"))
+                Spacer()
+                if !turn.tone.isEmpty {
+                    Label(turn.tone.shortWarning, systemImage: "exclamationmark.bubble")
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.3), in: Capsule())
+                }
             }
-            section(turn.isOwnTranslation ? "Cümlem" : "Duyulan", icon: "waveform",
-                    text: turn.heard, note: turn.isOwnTranslation ? nil : turn.heardLanguage.title)
+            .font(.caption.weight(.semibold)).opacity(0.75)
+
+            // 1. satır: duyulan
+            Text(turn.heard).font(.title3.weight(.medium))
+            // 2. satır: çeviri (italik)
             if !turn.translation.isEmpty {
-                section("Çeviri", icon: "character.book.closed", text: turn.translation, note: nil)
+                Text(turn.translation).font(.body).italic().opacity(0.85)
             }
-            if !turn.englishEquivalent.isEmpty {
-                section("Doğal İngilizcesi", icon: "text.quote", text: turn.englishEquivalent, note: nil)
+            // 3. satır (yalnızca İngilizce): doğal İngilizce (italik)
+            if turn.heardLanguage == .en && !turn.isOwnTranslation {
+                if turn.naturalPending {
+                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Doğal İngilizcesi hazırlanıyor…").font(.footnote).italic() }.opacity(0.7)
+                } else if !turn.natural.isEmpty {
+                    Label { Text(turn.natural).italic() } icon: { Image(systemName: "checkmark.seal") }
+                        .font(.body).foregroundStyle(theme.onCard)
+                }
             }
-            if !turn.suggestion.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Sen söyle", systemImage: "mic").font(.subheadline.weight(.bold))
-                    Text(turn.suggestion).font(.title3)
-                    if !turn.suggestionTR.isEmpty {
-                        Text(turn.suggestionTR).font(.subheadline).opacity(0.8)
+
+            // Düğmeler
+            if !turn.isOwnTranslation {
+                HStack(spacing: 8) {
+                    small(turn.heardLanguage == .tr ? "Çeviriyi Dinle" : "Doğal İngilizceyi Dinle", "speaker.wave.2.fill", primary: false) {
+                        c.speakEnglishLine(of: turn.id)
                     }
+                    .disabled(turn.heardLanguage == .tr ? turn.translation.isEmpty : turn.naturalPending)
+                    small(turn.replying ? "Hazırlanıyor…" : (turn.reply.isEmpty ? "Cevap Ver" : "Yeni Cevap"), "arrowshape.turn.up.left.fill", primary: true) {
+                        Task { await c.reply(to: turn.id) }
+                    }
+                    .disabled(turn.replying)
+                }
+            }
+
+            // Son satır: cevap (italik)
+            if !turn.reply.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(turn.reply).font(.title3).italic()
+                    if !turn.replyTR.isEmpty { Text(turn.replyTR).font(.footnote).opacity(0.8) }
+                    HStack(spacing: 16) {
+                        Button { c.replay(turn.reply, slow: false) } label: { Label("Tekrar Dinle", systemImage: "play.fill") }
+                        Button { c.replay(turn.reply, slow: true) } label: { Label("Yavaş", systemImage: "tortoise.fill") }
+                        Button { onSave() } label: { Label("Kaydet", systemImage: "bookmark") }
+                    }
+                    .font(.footnote.weight(.semibold)).buttonStyle(.borderless).padding(.top, 2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
+                .padding(12)
                 .background(theme.accent, in: RoundedRectangle(cornerRadius: 14))
                 .foregroundStyle(theme.onAccent)
-
-                HStack(spacing: 8) {
-                    small("Tekrar Dinle", "play.fill") { ConversationController.shared.replay(turn.suggestion, slow: false) }
-                    small("Yavaş Dinle", "tortoise.fill") { ConversationController.shared.replay(turn.suggestion, slow: true) }
-                    small("Kaydet", "bookmark") { onSave() }
-                }
             }
             if !turn.status.isEmpty {
-                HStack { ProgressView().opacity(turn.status.hasSuffix("…") ? 1 : 0); Text(turn.status).font(.footnote); Spacer() }
-                    .foregroundStyle(theme.onCard.opacity(0.8))
+                Text(turn.status).font(.footnote).opacity(0.75)
             }
         }
-        .padding(12)
-        .background(theme.card.opacity(0.92), in: RoundedRectangle(cornerRadius: 20))
-    }
-
-    private func section(_ title: String, icon: String, text: String, note: String?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Label(title, systemImage: icon).font(.subheadline.weight(.bold))
-                Spacer()
-                if let note { Text(note).font(.caption).opacity(0.7) }
-            }
-            Text(text).font(.title3)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
         .foregroundStyle(theme.onCard)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
     }
 
-    private func small(_ t: String, _ icon: String, _ a: @escaping () -> Void) -> some View {
+    private func small(_ t: String, _ icon: String, primary: Bool, _ a: @escaping () -> Void) -> some View {
         Button(action: a) {
-            Label(t, systemImage: icon).font(.footnote.weight(.semibold))
-                .frame(maxWidth: .infinity).padding(.vertical, 9)
-                .background(Color.white.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(theme.onCard)
+            Label(t, systemImage: icon).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                .background(primary ? theme.accent : Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(primary ? theme.onAccent : theme.onCard)
         }
     }
 }

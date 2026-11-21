@@ -43,6 +43,8 @@ final class AppSettings {
     var trSpeed: SpeechSpeed { didSet { d.set(trSpeed.rawValue, forKey: "trSpeed") } }
     var enSpeed: SpeechSpeed { didSet { d.set(enSpeed.rawValue, forKey: "enSpeed") } }
     var modelTier: ModelTier { didSet { d.set(modelTier.rawValue, forKey: "modelTier") } }
+    /// İngilizce sözün Türkçesini kulaklıktan kendiliğinden oku (varsayılan kapalı)
+    var autoReadTranslation: Bool { didSet { d.set(autoReadTranslation, forKey: "autoRead") } }
 
     private init() {
         setupComplete = d.bool(forKey: "setupComplete")
@@ -62,6 +64,7 @@ final class AppSettings {
         trSpeed = SpeechSpeed(rawValue: d.string(forKey: "trSpeed") ?? "") ?? .normal
         enSpeed = SpeechSpeed(rawValue: d.string(forKey: "enSpeed") ?? "") ?? .normal
         modelTier = ModelTier(rawValue: d.string(forKey: "modelTier") ?? "") ?? .fast
+        autoReadTranslation = d.bool(forKey: "autoRead")
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {

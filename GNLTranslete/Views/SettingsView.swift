@@ -10,6 +10,11 @@ struct SettingsView: View {
             NavigationLink { AppearanceSettingsView() } label: { Label("Görünüm", systemImage: "paintpalette") }
             NavigationLink { VoiceSettingsView() } label: { Label("Ses ve Konuşma", systemImage: "speaker.wave.2") }
             ModelTierSection()
+            Section {
+                Toggle("İngilizce sözlerin Türkçesini kulaklıktan otomatik oku", isOn: $s.autoReadTranslation)
+            } footer: {
+                Text("Kapalıyken kulaklığa yalnızca bastığın düğmelerin sesi gelir.")
+            }
             Section("Ana Ekrana Dönünce") {
                 Picker("Ana Ekrana Dönünce", selection: $s.resumeBehavior) {
                     ForEach(ResumeBehavior.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -119,6 +124,8 @@ struct VoiceSettingsView: View {
     var body: some View {
         @Bindable var s = settings
         List {
+            quickPick(.tr, title: "Türkçe ses", selection: $s.trVoiceID)
+            quickPick(.en, title: "İngilizce ses (cevaplar)", selection: $s.enVoiceID)
             voiceSection(title: "Türkçe çeviri sesi", lang: .tr, voices: trVoices, selection: $s.trVoiceID,
                          sample: "Merhaba, çeviriler bu sesle okunacak.")
             Section("Türkçe hız") {
@@ -143,6 +150,45 @@ struct VoiceSettingsView: View {
         .navigationTitle("Ses ve Konuşma")
         .onAppear(perform: reload)
         .onChange(of: phase) { _, p in if p == .active { reload() } }
+    }
+
+    @ViewBuilder
+    private func quickPick(_ lang: SpeechLang, title: String, selection: Binding<String?>) -> some View {
+        let female = SpeechOutput.best(lang, gender: .female)
+        let male = SpeechOutput.best(lang, gender: .male)
+        let current = SpeechOutput.shared.resolvedVoice(lang).voice
+        Section(title) {
+            HStack(spacing: 10) {
+                pickButton("Doğal Kadın", voice: female, selected: current?.identifier == female?.identifier) { selection.wrappedValue = female?.identifier }
+                pickButton("Doğal Erkek", voice: male, selected: current?.identifier == male?.identifier) { selection.wrappedValue = male?.identifier }
+            }
+            if let v = current, v.quality == .default {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Şu anki ses \"Standart\" kalitede, bu yüzden mekanik duyuluyor.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text("Doğal ses için bir kez indir (Wi-Fi, birkaç yüz MB):")
+                    Text("iPhone Ayarlar → Erişilebilirlik → Okunan İçerik → Sesler → \(lang == .tr ? "Türkçe" : "English") → adının yanında **Premium** ya da **Gelişmiş** yazan bir kadın ve bir erkek sesi seç → indir.")
+                    Text("Uygulamaya dönünce burada otomatik görünür ve Doğal Kadın / Doğal Erkek onları seçer.").foregroundStyle(.secondary)
+                }
+                .font(.footnote)
+            }
+        }
+    }
+
+    private func pickButton(_ title: String, voice: AVSpeechSynthesisVoice?, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(voice.map { "\($0.name) · \(qualityName($0))" } ?? "Yok").font(.caption2).opacity(0.8)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 8)
+            .background(selected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(voice == nil)
+    }
+
+    private func qualityName(_ v: AVSpeechSynthesisVoice) -> String {
+        switch v.quality { case .premium: "Premium"; case .enhanced: "Gelişmiş"; default: "Standart" }
     }
 
     private func reload() {

@@ -53,17 +53,19 @@ struct PracticeState: Codable, Equatable {
 }
 
 /// Sohbet kartı (bellekte; yeniden açılışta boş başlar).
+/// Türkçe söz:  duyulan · italik İngilizcesi · (Cevap Ver →) cevap
+/// İngilizce söz: duyulan · italik Türkçesi · italik doğal İngilizcesi · (Cevap Ver →) cevap
 struct ConversationTurn: Identifiable, Equatable {
     let id = UUID()
-    var generation: Int
     var heard: String
     var heardLanguage: DetectedLanguage
-    var translation: String = ""        // Türkçe çeviri (İngilizce söz) veya İngilizce çeviri (Türkçe söz)
-    var englishEquivalent: String = ""  // Ev modunda İngilizce sözün doğal İngilizce karşılığı
-    var suggestion: String = ""
-    var suggestionTR: String = ""
+    var translation: String = ""      // .tr → İngilizce, .en → Türkçe
+    var natural: String = ""          // yalnızca .en: doğal İngilizce
+    var reply: String = ""            // Cevap Ver ile üretilir
+    var replyTR: String = ""
+    var replying = false
+    var naturalPending = false
     var tone: ToneResult = .none
-    var topic: String = ""
-    var status: String = "Çevriliyor…"
-    var isOwnTranslation = false        // Cümlemi Çevir sonucu
+    var status: String = ""
+    var isOwnTranslation = false      // Cümlemi Çevir sonucu
 }

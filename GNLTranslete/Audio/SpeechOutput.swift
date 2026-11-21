@@ -37,7 +37,14 @@ final class SpeechOutput: NSObject, AVSpeechSynthesizerDelegate {
     static func voices(_ lang: SpeechLang) -> [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language.hasPrefix(lang.prefix) }
+            // eğlence/robot seslerini (Zarvox, Bells, Eddy…) listeleme
+            .filter { !$0.identifier.contains("speech.synthesis.voice") && !$0.identifier.contains("eloquence") }
             .sorted { ($0.quality.rawValue, $0.name) > ($1.quality.rawValue, $1.name) }
+    }
+
+    /// Belirli cinsiyette en kaliteli ses (Premium > Gelişmiş > Standart).
+    static func best(_ lang: SpeechLang, gender: AVSpeechSynthesisVoiceGender) -> AVSpeechSynthesisVoice? {
+        voices(lang).first { $0.gender == gender }
     }
 
     /// Seçili ses yoksa aynı dilde çalışan yerel sese döner.
