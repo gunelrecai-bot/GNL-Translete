@@ -51,6 +51,37 @@ final class WhisperEngine {
         return FileManager.default.fileExists(atPath: base.appendingPathComponent(rel).appendingPathComponent("AudioEncoder.mlmodelc").path)
     }
 
+    /// Boyut bazında indirme (seçmeden, belleğe yüklemeden)
+    private(set) var sizeProgress: [WhisperSize: Double] = [:]
+    private(set) var sizeError: [WhisperSize: String] = [:]
+
+    @MainActor
+    func download(_ sz: WhisperSize) async {
+        guard !isDownloaded(sz), sizeProgress[sz] == nil else { return }
+        sizeProgress[sz] = 0
+        sizeError[sz] = nil
+        do {
+            let url = try await WhisperKit.download(variant: sz.variant, downloadBase: base, from: Self.repo, progressCallback: { p in
+                Task { @MainActor in WhisperEngine.shared.sizeProgress[sz] = p.fractionCompleted }
+            })
+            d.set(url.path.replacingOccurrences(of: base.path + "/", with: ""), forKey: "whisperRel-\(sz.rawValue)")
+            if sz == size && state == .missing { state = .standby }
+        } catch {
+            sizeError[sz] = error.localizedDescription
+        }
+        sizeProgress[sz] = nil
+    }
+
+    /// Bir boyutu telefondan sil (yer açmak için)
+    @MainActor
+    func delete(_ sz: WhisperSize) {
+        if let rel = d.string(forKey: "whisperRel-\(sz.rawValue)") {
+            try? FileManager.default.removeItem(at: base.appendingPathComponent(rel))
+        }
+        d.removeObject(forKey: "whisperRel-\(sz.rawValue)")
+        if sz == size { pipe = nil; state = .missing }
+    }
+
     /// "Small: indirildi · Turbo: indirilmedi" gibi özet
     var sizesSummary: String {
         WhisperSize.allCases.map { "\($0 == .small ? "Small" : "Turbo"): \(isDownloaded($0) ? "indirildi" : "indirilmedi")" }

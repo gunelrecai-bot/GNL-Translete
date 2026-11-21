@@ -46,10 +46,8 @@ struct SetupView: View {
                             Button("İndir") { Task { await apple.install(); ConversationController.shared.restartListening() } }
                         }
                     }
-                    row(apple.isReady ? "Yedek: Whisper (isteğe bağlı)" : "Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready || whisper.state == .standby, detail: whisperText + (tick < 0 ? "" : "")) {
-                        Button("İndir") { Task { await whisper.downloadOnly() } }
-                            .disabled({ switch whisper.state { case .downloading, .loading: return true; default: return false } }())
-                    }
+                    row(apple.isReady ? "Whisper (isteğe bağlı)" : "Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready || whisper.state == .standby, detail: whisperText + (tick < 0 ? "" : "")) { EmptyView() }
+                    ForEach(WhisperSize.allCases, id: \.self) { sz in whisperSizeRow(sz) }
                     if case .failed = whisper.state {
                         Button("Tekrar Dene") { Task { await whisper.prepare() } }
                             .buttonStyle(.borderedProminent).tint(theme.accent).foregroundStyle(theme.onAccent)
@@ -140,14 +138,49 @@ struct SetupView: View {
     }
     private var whisperText: String {
         switch whisper.state {
-        case .standby: "\(whisper.sizesSummary) · Seçili: \(whisper.size == .turbo ? "Turbo" : "Small"), yedekte bekliyor. Seçim: Ayarlar → Konuşma Motoru."
+        case .standby: "Seçili boyut: \(whisper.size == .turbo ? "Turbo" : "Small") · yedekte bekliyor. Kullanmak için: Ayarlar → Konuşma Motoru → Whisper."
         case .ready: "Whisper \(whisper.size == .turbo ? "large-v3 turbo" : "small") · MIT · kurulu, çevrimdışı"
-        case .missing: "\(whisper.sizesSummary) · İsteğe bağlı. Seçim: Ayarlar → Konuşma Motoru."
+        case .missing: "İsteğe bağlı. Aşağıdan istediğin boyutu indirebilirsin. Kullanmak için: Ayarlar → Konuşma Motoru → Whisper."
         case .downloading(let p): "İndiriliyor %\(Int(p * 100))"
         case .loading:
             "Hazırlanıyor… \(Int(Date().timeIntervalSince(whisper.loadStarted ?? Date()))) sn · \(whisper.stage). İlk seferde birkaç dakika sürebilir; uygulamadan çıkma."
         case .failed(let e): "Hata: \(e)"
         }
+    }
+
+    /// Whisper boyutu satırı: boyut, indirildi/indirilmedi, İndir / Sil
+    @ViewBuilder
+    private func whisperSizeRow(_ sz: WhisperSize) -> some View {
+        let done = whisper.isDownloaded(sz)
+        let name = sz == .small ? "Small" : "Turbo"
+        let mb = sz == .small ? "~220 MB" : "~630 MB"
+        let note = sz == .small ? "hızlı, hafif" : "en isabetli, daha yavaş"
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: done ? "checkmark.circle.fill" : "arrow.down.circle")
+                .foregroundStyle(done ? .green : theme.accent).font(.title3)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Whisper \(name) · \(mb)").font(.headline)
+                Group {
+                    if let p = whisper.sizeProgress[sz] { Text("İniyor %\(Int(p * 100))") }
+                    else if let e = whisper.sizeError[sz] { Text("Hata: \(e)") }
+                    else { Text("\(note) · \(done ? "indirildi" : "indirilmedi")\(whisper.size == sz && AppSettings.shared.speechEngine == .whisper ? " · seçili" : "")") }
+                }
+                .font(.footnote).opacity(0.8)
+            }
+            Spacer()
+            if whisper.sizeProgress[sz] != nil {
+                ProgressView()
+            } else if done {
+                Button("Sil", role: .destructive) { whisper.delete(sz) }
+                    .buttonStyle(.bordered)
+            } else {
+                Button("İndir") { Task { await whisper.download(sz) } }
+                    .buttonStyle(.borderedProminent).tint(theme.accent).foregroundStyle(theme.onAccent)
+            }
+        }
+        .foregroundStyle(theme.onCard)
+        .padding()
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func row<B: View>(_ title: String, ok: Bool, detail: String, @ViewBuilder action: () -> B) -> some View {
