@@ -23,10 +23,9 @@ final class OneShotListener {
         }
     }
 
-    /// Whisper ile tek söz (dil zorlanır). Cümlemi Çevir → Konuş için.
-    private var recorder: UtteranceRecorder?
+    /// Tek söz: Apple motoru (hazırsa), yoksa iPhone'un yerleşik tanıyıcısı. Cümlemi Çevir → Konuş için.
     private var live: AppleLiveTranscriber?
-    func listenWhisper(lang: String, timeout: TimeInterval = 20) async -> HeardTurn? {
+    func listenOnce(lang: String, timeout: TimeInterval = 20) async -> HeardTurn? {
         if AppleSpeechSupport.shared.isReady {
             let l = AppleLiveTranscriber(langs: [lang == "tr" ? .tr : .en])
             l.endSilence = 1.1
@@ -40,26 +39,10 @@ final class OneShotListener {
             }
             return r
         }
-        let r = UtteranceRecorder()
-        r.endSilence = 1.2
-        recorder = r
-        let samples: [Float]? = await withCheckedContinuation { (c: CheckedContinuation<[Float]?, Never>) in
-            var done = false
-            func finish(_ s: [Float]?) {
-                guard !done else { return }
-                done = true
-                r.stop()
-                c.resume(returning: s)
-            }
-            r.onUtterance = { s in finish(s) }
-            do { try r.start() } catch { finish(nil); return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(nil) }
-        }
-        guard let samples else { return nil }
-        return await WhisperEngine.shared.transcribe(samples, forced: lang)
+        return await listen(locale: lang == "tr" ? "tr-TR" : "en-US", timeout: timeout)
     }
 
-    func cancel() { engine?.stop(); recorder?.stop(); live?.stop() }
+    func cancel() { engine?.stop(); live?.stop() }
 }
 
 struct PronunciationFeedback {

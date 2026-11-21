@@ -13,7 +13,7 @@ struct SettingsView: View {
             Section {
                 Toggle("Hafif mod (önerilen)", isOn: $s.lightMode)
             } header: { Text("Performans") } footer: {
-                Text("Açıkken 3. satır (doğal İngilizce) yalnızca Doğal İngilizceyi Dinle'ye basınca üretilir; telefon daha az ısınır ve yavaşlamaz. Daha da hafif istersen Kurulum Durumu'ndan Whisper Small'u seç.")
+                Text("Açıkken 3. satır (doğal İngilizce) yalnızca Doğal İngilizceyi Dinle'ye basınca üretilir; telefon daha az ısınır ve yavaşlamaz.")
             }
             Section {
                 Toggle("İngilizce sözlerin Türkçesini kulaklıktan otomatik oku", isOn: $s.autoReadTranslation)

@@ -72,7 +72,7 @@ final class AppleSpeechSupport {
     var statusText: String {
         switch state {
         case .checking: "Kontrol ediliyor…"
-        case .unsupported(let why): "Kullanılamıyor: \(why). Whisper kullanılacak."
+        case .unsupported(let why): "Kullanılamıyor: \(why). Yedek tanıyıcı kullanılacak."
         case .needsAssets: "Türkçe/İngilizce dil dosyaları indirilmedi"
         case .installing: "İndiriliyor…"
         case .ready: turkishViaDictation

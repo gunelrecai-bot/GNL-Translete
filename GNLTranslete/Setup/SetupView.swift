@@ -16,7 +16,6 @@ struct SetupView: View {
     @State private var transConfig: TranslationSession.Configuration?
     @State private var transConfig2: TranslationSession.Configuration?
     @State private var model = ModelStore.shared
-    @State private var whisper = WhisperEngine.shared
     @State private var apple = AppleSpeechSupport.shared
     @State private var checking = false
     @State private var tick = 0
@@ -46,22 +45,8 @@ struct SetupView: View {
                             Button("İndir") { Task { await apple.install(); ConversationController.shared.restartListening() } }
                         }
                     }
-                    row(apple.isReady ? "Yedek: Whisper (gerekmez)" : "Konuşma tanıma modeli (Whisper)", ok: whisper.state == .ready, detail: whisperText + (tick < 0 ? "" : "")) {
-                        Button("İndir") { Task { await whisper.prepare() } }
-                            .disabled({ switch whisper.state { case .downloading, .loading: return true; default: return false } }())
-                    }
-                    Picker("Konuşma modeli", selection: Binding(get: { whisper.size }, set: { v in Task { await whisper.switchSize(v) } })) {
-                        ForEach(WhisperSize.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .padding(.horizontal).padding(.vertical, 8)
-                    .background(theme.card, in: RoundedRectangle(cornerRadius: 16))
-                    if case .failed = whisper.state {
-                        Button("Tekrar Dene") { Task { await whisper.prepare() } }
-                            .buttonStyle(.borderedProminent).tint(theme.accent).foregroundStyle(theme.onAccent)
-                    }
                     ForEach(onDevice, id: \.locale) { s in
-                        row("Telaffuz kontrolü için iPhone tanıyıcısı (\(s.locale == "tr-TR" ? "Türkçe" : "İngilizce"))", ok: s.ready,
+                        row("Yedek tanıyıcı ve telaffuz (\(s.locale == "tr-TR" ? "Türkçe" : "İngilizce"))", ok: s.ready,
                             detail: s.ready ? "Hazır, çevrimdışı" : "Eksik: Ayarlar → Genel → Klavye → Dikte'yi açın ve klavyelere \(s.locale == "tr-TR" ? "Türkçe" : "English (US)") ekleyin. iPhone dil dosyasını kendisi indirir.") { EmptyView() }
                     }
                     row("Çeviri dil paketi (Türkçe ⇄ İngilizce)", ok: transReady,
@@ -142,19 +127,8 @@ struct SetupView: View {
         }
     }
     private var essentialsReady: Bool {
-        micOK && speechAuthOK && (apple.isReady || whisper.state == .ready) && transReady && model.state == .ready
+        micOK && speechAuthOK && (apple.isReady || onDevice.allSatisfy(\.ready)) && transReady && model.state == .ready
     }
-    private var whisperText: String {
-        switch whisper.state {
-        case .ready: "Whisper \(whisper.size == .turbo ? "large-v3 turbo" : "small") · MIT · kurulu, çevrimdışı"
-        case .missing: "Whisper large-v3 turbo · MIT · \(whisper.approxSize), indirilmedi. Türkçe/İngilizce ayrımı ve dağınık konuşmada çok daha isabetli."
-        case .downloading(let p): "İndiriliyor %\(Int(p * 100))"
-        case .loading:
-            "Hazırlanıyor… \(Int(Date().timeIntervalSince(whisper.loadStarted ?? Date()))) sn · \(whisper.stage). İlk seferde birkaç dakika sürebilir; uygulamadan çıkma."
-        case .failed(let e): "Hata: \(e)"
-        }
-    }
-
     private func row<B: View>(_ title: String, ok: Bool, detail: String, @ViewBuilder action: () -> B) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle")

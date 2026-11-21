@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import AVFoundation
 
-/// Dinleme → Whisper ile yazıya dökme → çeviri (+ doğal İngilizce) akışı.
+/// Dinleme → Apple motorlarıyla yazıya dökme → çeviri (+ doğal İngilizce) akışı.
 /// Kulaklığa yalnızca kullanıcının bastığı şeyler gider (Çeviriyi Dinle / Doğal İngilizceyi Dinle / Cevap Ver).
 @MainActor
 @Observable
@@ -26,22 +26,25 @@ final class ConversationController {
 
     private(set) var lastOwnEnglish: String?
 
-    private let recorder = UtteranceRecorder()
+    /// Yedek: iPhone'un yerleşik tanıyıcısı (indirme yok, uygulama belleği yok)
+    private let fallback = ListeningEngine()
     private let live = AppleLiveTranscriber()
     private(set) var partial = ""
-    /// Apple'ın yeni motoru hazırsa o, değilse Whisper kullanılır.
+    /// Apple'ın yeni motoru hazırsa o, değilse iPhone'un yerleşik tanıyıcısı kullanılır.
     var usesApple: Bool { AppleSpeechSupport.shared.isReady }
     private let speech = SpeechOutput.shared
     private let route = AudioRoute.shared
-    private var queue: [[Float]] = []
-    private var working = false
 
     private init() {
         // Hoparlörden (Karşıya Oku) çalarken mikrofonu yok say: kendi sesimiz yeni söz sayılmasın.
         let sp = speech, rt = route
-        recorder.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
-        recorder.onLevel = { [weak self] l, s in self?.level = l; self?.hearingSpeech = s }
-        recorder.onUtterance = { [weak self] samples in self?.enqueue(samples) }
+        fallback.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
+        fallback.onLevel = { [weak self] l in self?.level = l; self?.hearingSpeech = l > 0.02 }
+        fallback.onPartial = { [weak self] t in self?.partial = t }
+        fallback.onTurn = { [weak self] heard in
+            self?.partial = ""
+            Task { await self?.handle(heard) }
+        }
         live.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
         live.onLevel = { [weak self] l, s in self?.level = l; self?.hearingSpeech = s }
         live.onPartial = { [weak self] t in self?.partial = t }
@@ -57,7 +60,6 @@ final class ConversationController {
     var statusLine: String {
         let l: String
         if !AppSettings.shared.setupComplete { l = "Kurulum bekleniyor" }
-        else if !usesApple && WhisperEngine.shared.state != .ready { l = "Konuşma modeli hazırlanıyor" }
         else if userPaused { l = "Duraklatıldı" }
         else if overlayPauses > 0 { l = "Dinleme beklemede" }
         else if transcribing > 0 { l = "Yazıya dökülüyor…" }
@@ -76,13 +78,13 @@ final class ConversationController {
             Task {
                 do { try await live.start() }
                 catch {
-                    // Apple motoru açılamazsa Whisper'a dön
-                    errorText = "Apple konuşma motoru açılamadı, Whisper kullanılıyor (\(error.localizedDescription))"
-                    do { try recorder.start() } catch { listening = false }
+                    // Apple motoru açılamazsa yerleşik tanıyıcıya dön
+                    errorText = "Apple konuşma motoru açılamadı, yedek tanıyıcı kullanılıyor"
+                    do { try fallback.start() } catch { listening = false }
                 }
             }
         } else {
-            do { try recorder.start() }
+            do { try fallback.start() }
             catch {
                 listening = false
                 errorText = "Mikrofon başlatılamadı: \(error.localizedDescription)"
@@ -91,7 +93,7 @@ final class ConversationController {
     }
 
     private func stopListening() {
-        recorder.stop()
+        fallback.stop()
         live.stop()
         partial = ""
         listening = false
@@ -149,31 +151,9 @@ final class ConversationController {
     func newConversation() {
         speech.stopAll()
         store = [.home: [], .travel: []]
-        queue.removeAll()
         lastOwnEnglish = nil
         hint = ""
         if !userPaused { startIfAllowed() }
-    }
-
-    // MARK: Yazıya dökme kuyruğu (arka arkaya konuşmalar kaybolmasın)
-    private func enqueue(_ samples: [Float]) {
-        queue.append(samples)
-        transcribing = queue.count + (working ? 1 : 0)
-        guard !working else { return }
-        working = true
-        Task { await drain() }
-    }
-
-    private func drain() async {
-        while !queue.isEmpty {
-            let s = queue.removeFirst()
-            transcribing = queue.count + 1
-            if let heard = await WhisperEngine.shared.transcribe(s) {
-                await handle(heard)
-            }
-        }
-        working = false
-        transcribing = 0
     }
 
     // MARK: Kart oluşturma
