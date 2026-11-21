@@ -67,17 +67,17 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/GNLTranslete.app Payload/
-          zip -qr GNL-Translete.ipa Payload
-          ls -lh GNL-Translete.ipa
+          zip -qr "GNL-Canli-Ceviri-${{ github.run_number }}.ipa" Payload
+          ls -lh *.ipa
 
       - uses: actions/upload-artifact@v4
         with:
           name: GNL-Translete-ipa
-          path: GNL-Translete.ipa
+          path: "*.ipa"
 
       - name: Sürüm yayınla
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" GNL-Translete.ipa --title "GNL-Translete $TAG" --notes "GNL-Canlı Çeviri — otomatik derleme. AltStore ile yükleyin." --latest
+          gh release create "$TAG" GNL-Canli-Ceviri-*.ipa --title "GNL-Translete $TAG" --notes "GNL-Canlı Çeviri — otomatik derleme. AltStore ile yükleyin." --latest
