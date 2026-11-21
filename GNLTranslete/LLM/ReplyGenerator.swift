@@ -99,14 +99,14 @@ final class ReplyGenerator {
 
     /// Bağlam: son 3 söz + seçilen söze anlamca en yakın 3 eski söz (konu değişimi / eski konuya dönüş için).
     static func relevantContext(for line: String, from history: [ContextTurn]) -> [ContextTurn] {
-        guard history.count > 6 else { return history }
+        guard history.count > 5 else { return history }
         let recent = Array(history.suffix(3))
         let older = Array(history.dropLast(3))
         guard let emb = NLEmbedding.sentenceEmbedding(for: .english) else { return Array(history.suffix(6)) }
         let ranked = older.enumerated()
             .map { ($0.offset, emb.distance(between: line.lowercased(), and: $0.element.english.lowercased())) }
             .sorted { $0.1 < $1.1 }
-            .prefix(3)
+            .prefix(2)
             .map(\.0)
             .sorted()
         return ranked.map { older[$0] } + recent
@@ -126,7 +126,7 @@ final class ReplyGenerator {
         You help a Turkish speaker continue a spoken conversation in English. \(modeText)
         The user picked one line of the conversation. It may have been said by the other person or by the user. It may be a question, a statement, or an incomplete or badly transcribed sentence.
         Suggest the ONE next thing the user could naturally say in response to that line, in simple, common English.
-        Match the length to the line: a short line gets one short sentence. Never write a long reply to a short line.
+        Length: one or two short, clear sentences (about 6 to 20 words). Not a single word, not a paragraph.
         Never invent facts or preferences that were not said; if needed, offer simple options or ask one short question.
         Stay calm and polite even if the line is rude.
         Answer in exactly this format:
@@ -160,9 +160,9 @@ final class ReplyGenerator {
 
         let words = line.split(separator: " ").count
         let raw = await engine.generate([.init(role: "system", content: system), .init(role: "user", content: user)],
-                                        maxTokens: min(150, 60 + words * 6), temperature: 0.3)
+                                        maxTokens: 70, temperature: 0.3)
         guard var r = Self.parse(raw) else { return nil }
-        if words <= 5 { r.reply = Self.firstSentences(r.reply, max: 2, maxWords: 16) }
+        r.reply = Self.firstSentences(r.reply, max: 2, maxWords: 24)
         return r
     }
 

@@ -33,8 +33,8 @@ final class LlamaEngine {
     private func run(_ messages: [Message], maxTokens: Int, temperature: Float) -> String {
         guard let model, let vocab else { return "" }
         var cp = llama_context_default_params()
-        cp.n_ctx = 4096
-        cp.n_batch = 1024
+        cp.n_ctx = 2048          // kısa istemler için yeterli; bellek ve süre yarıya iner
+        cp.n_batch = 512
         let threads = Int32(max(2, min(6, ProcessInfo.processInfo.activeProcessorCount - 2)))
         cp.n_threads = threads
         cp.n_threads_batch = threads
@@ -44,7 +44,7 @@ final class LlamaEngine {
         // Sohbet şablonu
         let prompt = applyTemplate(messages)
         var tokens = tokenize(prompt)
-        if tokens.count > 3800 { tokens = Array(tokens.suffix(3800)) }
+        if tokens.count > 1800 { tokens = Array(tokens.suffix(1800)) }
         guard !tokens.isEmpty else { return "" }
 
         let decodeOK: Bool = tokens.withUnsafeMutableBufferPointer { p in

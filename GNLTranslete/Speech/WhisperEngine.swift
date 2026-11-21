@@ -2,13 +2,14 @@ import Foundation
 import AVFoundation
 import Observation
 import WhisperKit
+import NaturalLanguage
 
 /// Whisper (large-v3 turbo, sıkıştırılmış ~630 MB, MIT) ile cihaz içi konuşma tanıma.
 /// Türkçe/İngilizce dil ayrımı Whisper'ın kendi dil tespitiyle yapılır.
 enum WhisperSize: String, CaseIterable {
     case turbo, small
-    var variant: String { self == .turbo ? "openai_whisper-large-v3-v20240930_turbo_632MB" : "openai_whisper-small" }
-    var title: String { self == .turbo ? "En isabetli (Turbo, ~630 MB)" : "Hızlı hazırlanan (Small, ~480 MB)" }
+    var variant: String { self == .turbo ? "openai_whisper-large-v3-v20240930_turbo_632MB" : "openai_whisper-small_216MB" }
+    var title: String { self == .turbo ? "En isabetli, yavaş (Turbo, ~630 MB)" : "Hızlı (Small, ~220 MB) — önerilen" }
 }
 
 @Observable
@@ -25,10 +26,10 @@ final class WhisperEngine {
     private let d = UserDefaults.standard
 
     var size: WhisperSize {
-        get { WhisperSize(rawValue: d.string(forKey: "whisperSize") ?? "") ?? .turbo }
+        get { WhisperSize(rawValue: d.string(forKey: "whisperSize") ?? "") ?? .small }
         set { d.set(newValue.rawValue, forKey: "whisperSize") }
     }
-    var approxSize: String { size == .turbo ? "~630 MB" : "~480 MB" }
+    var approxSize: String { size == .turbo ? "~630 MB" : "~220 MB" }
 
     /// Uygulama güncellenince kapsayıcı yolu değişir; bu yüzden göreli yol saklanır.
     private var base: URL {
@@ -88,7 +89,9 @@ final class WhisperEngine {
                 }
             }
             // Kodlayıcı GPU'da: Neural Engine'in ilk seferdeki uzun derleme beklemesine takılmasın.
-            let compute = ModelComputeOptions(audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndNeuralEngine)
+            let compute = size == .turbo
+                ? ModelComputeOptions(audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndNeuralEngine)
+                : ModelComputeOptions(audioEncoderCompute: .cpuAndNeuralEngine, textDecoderCompute: .cpuAndNeuralEngine)
             let config = WhisperKitConfig(modelFolder: folder!.path, tokenizerFolder: base, computeOptions: compute,
                                           verbose: false, prewarm: false, load: false, download: false)
             let p = try await WhisperKit(config)
@@ -110,26 +113,55 @@ final class WhisperEngine {
         guard let pipe else { return nil }
         guard samples.count > 16000 / 3 else { return nil }   // < 0.33 sn
         do {
-            var lang = forced
-            if lang == nil {
-                let det = try await pipe.detectLanguage(audioPath: try Self.writeTempWav(samples))
-                let tr = det.langProbs["tr"] ?? 0, en = det.langProbs["en"] ?? 0
-                lang = tr > en ? "tr" : "en"
+            // Tek geçiş: dil tespiti yazıya dökmeyle birlikte yapılır (eskiden iki ayrı geçişti, iki kat yavaştı).
+            var pass = try await run(pipe, samples, lang: forced)
+            guard var text = pass.text, !text.isEmpty else { return nil }
+            var lang = forced ?? Self.map(pass.lang)
+
+            if forced == nil {
+                // Metnin kendisine bak: Türkçe metin İngilizce sanıldıysa (ya da tersi) düzelt.
+                let nl = NLLanguageRecognizer()
+                nl.languageConstraints = [.turkish, .english]
+                nl.processString(text)
+                let h = nl.languageHypotheses(withMaximum: 2)
+                let trP = h[.turkish] ?? 0, enP = h[.english] ?? 0
+                let textLang: String? = trP > 0.8 ? "tr" : (enP > 0.8 ? "en" : nil)
+                if lang == nil || (textLang != nil && textLang != lang) {
+                    // Whisper başka bir dil seçti (ör. Azerice) ya da metin dile uymuyor: doğru dille bir kez daha
+                    let target = textLang ?? (trP >= enP ? "tr" : "en")
+                    if target != lang {
+                        pass = try await run(pipe, samples, lang: target)
+                        if let t = pass.text, !t.isEmpty { text = t }
+                    }
+                    lang = target
+                }
             }
-            let opts = DecodingOptions(task: .transcribe, language: lang, temperature: 0,
-                                       usePrefillPrompt: true, skipSpecialTokens: true, withoutTimestamps: true)
-            let results = try await pipe.transcribe(audioArray: samples, decodeOptions: opts)
-            let segs = results.flatMap(\.segments)
-            // sessizlik/gürültü kaynaklı uydurma metinleri at
-            let speech = segs.filter { $0.noSpeechProb < 0.6 }
-            let text = speech.map(\.text).joined(separator: " ")
-                .replacingOccurrences(of: "  ", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty, !Self.isHallucination(text) else { return nil }
-            let conf = speech.isEmpty ? 0.5 : Float(speech.map { exp($0.avgLogprob) }.reduce(0, +)) / Float(speech.count)
-            return HeardTurn(text: text, language: lang == "tr" ? .tr : .en, confidence: conf)
+            guard !Self.isHallucination(text) else { return nil }
+            return HeardTurn(text: text, language: lang == "tr" ? .tr : .en, confidence: pass.conf)
         } catch {
             return nil
+        }
+    }
+
+    private func run(_ pipe: WhisperKit, _ samples: [Float], lang: String?) async throws -> (text: String?, lang: String, conf: Float) {
+        let opts = DecodingOptions(task: .transcribe, language: lang, temperature: 0,
+                                   usePrefillPrompt: lang != nil, detectLanguage: lang == nil,
+                                   skipSpecialTokens: true, withoutTimestamps: true)
+        let results = try await pipe.transcribe(audioArray: samples, decodeOptions: opts)
+        let segs = results.flatMap(\.segments).filter { $0.noSpeechProb < 0.6 }   // sessizlik/gürültü uydurmalarını at
+        let text = segs.map(\.text).joined(separator: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let conf = segs.isEmpty ? 0.5 : Float(segs.map { exp($0.avgLogprob) }.reduce(0, +)) / Float(segs.count)
+        return (text.isEmpty ? nil : text, results.first?.language ?? lang ?? "", conf)
+    }
+
+    /// Whisper dil kodu → tr / en (Türkçe bazen Azerice ya da Türkmence sanılır).
+    static func map(_ code: String) -> String? {
+        switch code {
+        case "tr", "az", "tk", "ba", "tt", "uz", "kk": return "tr"
+        case "en": return "en"
+        default: return nil
         }
     }
 

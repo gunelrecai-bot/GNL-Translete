@@ -9,7 +9,12 @@ import AVFoundation
 final class ConversationController {
     static let shared = ConversationController()
 
-    private(set) var turns: [ConversationTurn] = []
+    /// Ev ve Seyahat sohbetleri ayrı tutulur; mod değişince diğerinin sohbeti görünür.
+    private var store: [ConversationMode: [ConversationTurn]] = [.home: [], .travel: []]
+    private(set) var turns: [ConversationTurn] {
+        get { store[AppSettings.shared.mode] ?? [] }
+        set { store[AppSettings.shared.mode] = newValue }
+    }
     private(set) var level: Float = 0
     private(set) var hearingSpeech = false
     private(set) var transcribing = 0
@@ -102,11 +107,15 @@ final class ConversationController {
         endOverlay(applyResumeSetting: false)
     }
 
-    func setMode(_ m: ConversationMode) { AppSettings.shared.mode = m }
+    func setMode(_ m: ConversationMode) {
+        guard m != AppSettings.shared.mode else { return }
+        speech.stopAll()
+        AppSettings.shared.mode = m
+    }
 
     func newConversation() {
         speech.stopAll()
-        turns.removeAll()
+        store = [.home: [], .travel: []]
         queue.removeAll()
         lastOwnEnglish = nil
         hint = ""
@@ -170,7 +179,9 @@ final class ConversationController {
     }
 
     private func update(_ t: ConversationTurn) {
-        if let i = turns.firstIndex(where: { $0.id == t.id }) { turns[i] = t }
+        for m in ConversationMode.allCases {
+            if let i = store[m]?.firstIndex(where: { $0.id == t.id }) { store[m]?[i] = t; return }
+        }
     }
 
     /// Kartın İngilizce hâli (bağlam için).
