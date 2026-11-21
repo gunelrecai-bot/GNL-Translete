@@ -50,12 +50,6 @@ struct SetupView: View {
                         Button("İndir") { Task { await whisper.downloadOnly() } }
                             .disabled({ switch whisper.state { case .downloading, .loading: return true; default: return false } }())
                     }
-                    Picker("Konuşma modeli", selection: Binding(get: { whisper.size }, set: { v in Task { await whisper.switchSize(v) } })) {
-                        ForEach(WhisperSize.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .padding(.horizontal).padding(.vertical, 8)
-                    .background(theme.card, in: RoundedRectangle(cornerRadius: 16))
                     if case .failed = whisper.state {
                         Button("Tekrar Dene") { Task { await whisper.prepare() } }
                             .buttonStyle(.borderedProminent).tint(theme.accent).foregroundStyle(theme.onAccent)
@@ -146,7 +140,7 @@ struct SetupView: View {
     }
     private var whisperText: String {
         switch whisper.state {
-        case .standby: "İndirildi · yedekte bekliyor. Apple motoru çalışırken belleğe yüklenmez, telefonu yormaz."
+        case .standby: "\(whisper.size == .turbo ? "Turbo" : "Small") indirildi · yedekte bekliyor. Boyut seçimi: Ayarlar → Konuşma Motoru."
         case .ready: "Whisper \(whisper.size == .turbo ? "large-v3 turbo" : "small") · MIT · kurulu, çevrimdışı"
         case .missing: "İsteğe bağlı yedek · \(whisper.approxSize). Yalnızca Apple motoru çalışmazsa devreye girer."
         case .downloading(let p): "İndiriliyor %\(Int(p * 100))"
