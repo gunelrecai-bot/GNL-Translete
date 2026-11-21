@@ -62,7 +62,7 @@ final class WhisperEngine {
         do {
             var lang = forced
             if lang == nil {
-                let det = try await pipe.detectLanguage(audioArray: samples)
+                let det = try await pipe.detectLanguage(audioPath: try Self.writeTempWav(samples))
                 let tr = det.langProbs["tr"] ?? 0, en = det.langProbs["en"] ?? 0
                 lang = tr > en ? "tr" : "en"
             }
@@ -81,6 +81,21 @@ final class WhisperEngine {
         } catch {
             return nil
         }
+    }
+
+    /// Dil tespiti için geçici 16 kHz WAV.
+    static func writeTempWav(_ samples: [Float]) throws -> String {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("gnl-lang.wav")
+        try? FileManager.default.removeItem(at: url)
+        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+        let file = try AVAudioFile(forWriting: url, settings: fmt.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        // dil tespiti için ilk 10 saniye yeterli
+        let n = min(samples.count, 160_000)
+        guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(n)) else { return url.path }
+        buf.frameLength = AVAudioFrameCount(n)
+        samples.withUnsafeBufferPointer { p in buf.floatChannelData![0].update(from: p.baseAddress!, count: n) }
+        try file.write(from: buf)
+        return url.path
     }
 
     private static let junk = ["altyazı m.k", "altyazı", "izlediğiniz için teşekkürler", "abone ol", "thank you for watching",
