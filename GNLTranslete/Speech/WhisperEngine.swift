@@ -5,32 +5,56 @@ import WhisperKit
 
 /// Whisper (large-v3 turbo, sıkıştırılmış ~630 MB, MIT) ile cihaz içi konuşma tanıma.
 /// Türkçe/İngilizce dil ayrımı Whisper'ın kendi dil tespitiyle yapılır.
+enum WhisperSize: String, CaseIterable {
+    case turbo, small
+    var variant: String { self == .turbo ? "openai_whisper-large-v3-v20240930_turbo_632MB" : "openai_whisper-small" }
+    var title: String { self == .turbo ? "En isabetli (Turbo, ~630 MB)" : "Hızlı hazırlanan (Small, ~480 MB)" }
+}
+
 @Observable
 final class WhisperEngine {
     static let shared = WhisperEngine()
-    static let modelName = "openai_whisper-large-v3-v20240930_turbo_632MB"
     static let repo = "argmaxinc/whisperkit-coreml"
-    let approxSize = "~630 MB"
 
     enum State: Equatable { case missing, downloading(Double), loading, ready, failed(String) }
     private(set) var state: State = .missing
+    private(set) var stage = ""
     private(set) var loadStarted: Date?
     private var preparing = false
     private var pipe: WhisperKit?
     private let d = UserDefaults.standard
 
-    private var savedFolder: String? {
-        get { d.string(forKey: "whisperFolder") }
-        set { d.set(newValue, forKey: "whisperFolder") }
+    var size: WhisperSize {
+        get { WhisperSize(rawValue: d.string(forKey: "whisperSize") ?? "") ?? .turbo }
+        set { d.set(newValue.rawValue, forKey: "whisperSize") }
     }
+    var approxSize: String { size == .turbo ? "~630 MB" : "~480 MB" }
 
-    var isDownloaded: Bool {
-        guard let f = savedFolder else { return false }
-        return FileManager.default.fileExists(atPath: f)
+    /// Uygulama güncellenince kapsayıcı yolu değişir; bu yüzden göreli yol saklanır.
+    private var base: URL {
+        let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Whisper", isDirectory: true)
+        try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+        return u
     }
+    private var relKey: String { "whisperRel-\(size.rawValue)" }
+    private var modelFolder: URL? {
+        guard let rel = d.string(forKey: relKey) else { return nil }
+        let u = base.appendingPathComponent(rel)
+        return FileManager.default.fileExists(atPath: u.appendingPathComponent("AudioEncoder.mlmodelc").path) ? u : nil
+    }
+    var isDownloaded: Bool { modelFolder != nil }
 
     private init() {
         state = isDownloaded ? .loading : .missing
+    }
+
+    /// Küçük / büyük model arasında geçiş.
+    @MainActor
+    func switchSize(_ s: WhisperSize) async {
+        size = s
+        pipe = nil
+        state = isDownloaded ? .loading : .missing
+        await prepare()
     }
 
     /// İndir (gerekirse) ve belleğe yükle.
@@ -41,22 +65,41 @@ final class WhisperEngine {
         preparing = true
         defer { preparing = false }
         do {
-            var folder = savedFolder
-            if folder == nil || !isDownloaded {
+            var folder = modelFolder
+            if folder == nil {
                 state = .downloading(0)
-                let url = try await WhisperKit.download(variant: Self.modelName, from: Self.repo, progressCallback: { p in
+                stage = "İndiriliyor"
+                let url = try await WhisperKit.download(variant: size.variant, downloadBase: base, from: Self.repo, progressCallback: { p in
                     Task { @MainActor in WhisperEngine.shared.state = .downloading(p.fractionCompleted) }
                 })
-                folder = url.path
-                savedFolder = url.path
+                let rel = url.path.replacingOccurrences(of: base.path + "/", with: "")
+                d.set(rel, forKey: relKey)
+                folder = url
             }
             state = .loading
             loadStarted = Date()
+            stage = "Model dosyaları açılıyor"
+            let started = loadStarted
+            // 4 dakikayı geçerse takıldı say ve kullanıcıya küçük modeli öner
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(240))
+                if self.state == .loading, self.loadStarted == started {
+                    self.state = .failed("Hazırlama 4 dakikayı geçti (aşama: \(self.stage)). Uygulamayı kapatıp açmayı ya da Small modeli deneyin.")
+                }
+            }
             // Kodlayıcı GPU'da: Neural Engine'in ilk seferdeki uzun derleme beklemesine takılmasın.
             let compute = ModelComputeOptions(audioEncoderCompute: .cpuAndGPU, textDecoderCompute: .cpuAndNeuralEngine)
-            let config = WhisperKitConfig(modelFolder: folder, computeOptions: compute, verbose: false, prewarm: false, load: true, download: false)
-            pipe = try await WhisperKit(config)
+            let config = WhisperKitConfig(modelFolder: folder!.path, tokenizerFolder: base, computeOptions: compute,
+                                          verbose: false, prewarm: false, load: false, download: false)
+            let p = try await WhisperKit(config)
+            p.modelStateCallback = { _, new in
+                Task { @MainActor in WhisperEngine.shared.stage = "\(new)" }
+            }
+            stage = "Model yükleniyor"
+            try await p.loadModels()
+            pipe = p
             state = .ready
+            stage = "Hazır"
         } catch {
             state = .failed(error.localizedDescription)
         }
