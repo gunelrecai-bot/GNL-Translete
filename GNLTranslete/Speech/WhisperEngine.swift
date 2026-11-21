@@ -45,6 +45,18 @@ final class WhisperEngine {
     }
     var isDownloaded: Bool { modelFolder != nil }
 
+    /// Belirli boyut indirilmiş mi (Kurulum Durumu'nda ikisini birden göstermek için)
+    func isDownloaded(_ sz: WhisperSize) -> Bool {
+        guard let rel = d.string(forKey: "whisperRel-\(sz.rawValue)") else { return false }
+        return FileManager.default.fileExists(atPath: base.appendingPathComponent(rel).appendingPathComponent("AudioEncoder.mlmodelc").path)
+    }
+
+    /// "Small: indirildi · Turbo: indirilmedi" gibi özet
+    var sizesSummary: String {
+        WhisperSize.allCases.map { "\($0 == .small ? "Small" : "Turbo"): \(isDownloaded($0) ? "indirildi" : "indirilmedi")" }
+            .joined(separator: " · ")
+    }
+
     private init() {
         state = isDownloaded ? .standby : .missing
     }

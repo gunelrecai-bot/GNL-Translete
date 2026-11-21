@@ -140,9 +140,9 @@ struct SetupView: View {
     }
     private var whisperText: String {
         switch whisper.state {
-        case .standby: "\(whisper.size == .turbo ? "Turbo" : "Small") indirildi · yedekte bekliyor. Boyut seçimi: Ayarlar → Konuşma Motoru."
+        case .standby: "\(whisper.sizesSummary) · Seçili: \(whisper.size == .turbo ? "Turbo" : "Small"), yedekte bekliyor. Seçim: Ayarlar → Konuşma Motoru."
         case .ready: "Whisper \(whisper.size == .turbo ? "large-v3 turbo" : "small") · MIT · kurulu, çevrimdışı"
-        case .missing: "İsteğe bağlı yedek · \(whisper.approxSize). Yalnızca Apple motoru çalışmazsa devreye girer."
+        case .missing: "\(whisper.sizesSummary) · İsteğe bağlı. Seçim: Ayarlar → Konuşma Motoru."
         case .downloading(let p): "İndiriliyor %\(Int(p * 100))"
         case .loading:
             "Hazırlanıyor… \(Int(Date().timeIntervalSince(whisper.loadStarted ?? Date()))) sn · \(whisper.stage). İlk seferde birkaç dakika sürebilir; uygulamadan çıkma."
