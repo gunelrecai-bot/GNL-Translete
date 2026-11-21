@@ -3,6 +3,7 @@ import AVFoundation
 import Speech
 import NaturalLanguage
 import Observation
+import UIKit
 
 /// iOS 26+ SpeechAnalyzer / SpeechTranscriber: Apple'ın yeni cihaz içi konuşma motoru.
 /// Konuşurken anlık (volatile) metin verir; Türkçe ve İngilizce iki ayrı motor aynı sesi paralel dinler,
@@ -93,6 +94,7 @@ final class AppleLiveTranscriber {
         var volatileText = ""
         var confSum = 0.0
         var confCount = 0
+        var votes = 0.0      // canlı önizlemede bu dilin kaç kez önde olduğu (uzunlukla ağırlıklı)
     }
 
     private let engine = AVAudioEngine()
@@ -203,7 +205,11 @@ final class AppleLiveTranscriber {
             lanes[i].volatileText = text
         }
         lastChange = Date()
-        let preview = bestLocked()?.text ?? ""
+        let previewTurn = bestLocked()
+        if let p = previewTurn, let k = lanes.firstIndex(where: { $0.lang == p.language }) {
+            lanes[k].votes += Double(p.text.count)
+        }
+        let preview = previewTurn?.text ?? ""
         lock.unlock()
         DispatchQueue.main.async { if !preview.isEmpty { self.onPartial?(preview) } }
     }
@@ -255,27 +261,61 @@ final class AppleLiveTranscriber {
 
     private func finishTurn(spoken: TimeInterval) {
         lock.lock()
-        let best = bestLocked()
-        for i in lanes.indices { lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0 }
+        let snapshot = lanes
+        for i in lanes.indices {
+            lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0; lanes[i].votes = 0
+        }
         lock.unlock()
-        guard spoken >= 0.4, let best, !best.text.isEmpty, best.text.filter(\.isLetter).count >= 2 else { return }
+        guard spoken >= 0.4, let best = Self.decide(snapshot, final: true),
+              !best.text.isEmpty, best.text.filter(\.isLetter).count >= 2 else { return }
         onTurn?(best)
     }
 
-    /// Dil seçimi: motorun güveni + metnin gerçekten o dilde olup olmadığı.
-    private func bestLocked() -> HeardTurn? {
+    /// Canlı önizleme için hızlı seçim (yazım denetimi yok).
+    private func bestLocked() -> HeardTurn? { Self.decide(lanes, final: false) }
+
+    /// Dil seçimi. Yanlış dildeki motor genellikle sözlükte olmayan kelimeler üretir
+    /// ("merhaba" → "Madama"); bu yüzden asıl ölçüt: kelimelerin o dilin sözlüğünde olması.
+    /// Ek ölçütler: metnin dili (NaturalLanguage), canlı önizlemedeki önde olma oyu, (ikisinde de varsa) motor güveni.
+    private static func decide(_ lanes: [Lane], final: Bool) -> HeardTurn? {
+        let texts = lanes.map { ($0.finalText + " " + $0.volatileText).trimmingCharacters(in: .whitespaces) }
+        let bothConf = lanes.allSatisfy { $0.confCount > 0 }
+        let totalVotes = max(1, lanes.map(\.votes).reduce(0, +))
         var best: (HeardTurn, Double)?
-        for l in lanes {
-            let text = (l.finalText + " " + l.volatileText).trimmingCharacters(in: .whitespaces)
+        for (i, l) in lanes.enumerated() {
+            let text = texts[i]
             guard !text.isEmpty else { continue }
             let conf = l.confCount > 0 ? l.confSum / Double(l.confCount) : 0.5
             let nl = NLLanguageRecognizer()
             nl.languageConstraints = [.turkish, .english]
             nl.processString(text)
             let match = nl.languageHypotheses(withMaximum: 2)[l.lang == .tr ? .turkish : .english] ?? 0
-            let score = conf * 0.5 + match * 0.5
+            var score: Double
+            if final {
+                let valid = dictionaryRatio(text, lang: l.lang)
+                score = valid * 0.5 + match * 0.3 + (l.votes / totalVotes) * 0.2
+                if bothConf { score = score * 0.85 + conf * 0.15 }
+            } else {
+                score = match * 0.7 + (bothConf ? conf * 0.3 : 0.15)
+            }
             if best == nil || score > best!.1 { best = (HeardTurn(text: text, language: l.lang, confidence: Float(conf)), score) }
         }
         return best?.0
+    }
+
+    /// Kelimelerin ne kadarı o dilin sözlüğünde var (0…1).
+    static func dictionaryRatio(_ text: String, lang: DetectedLanguage) -> Double {
+        let code = lang == .tr ? "tr_TR" : "en_US"
+        guard UITextChecker.availableLanguages.contains(code) else { return 0.5 }
+        let words = text.components(separatedBy: CharacterSet.letters.inverted).filter { $0.count >= 2 }
+        guard !words.isEmpty else { return 0 }
+        let checker = UITextChecker()
+        var ok = 0
+        for w in words {
+            let r = checker.rangeOfMisspelledWord(in: w, range: NSRange(location: 0, length: (w as NSString).length),
+                                                  startingAt: 0, wrap: false, language: code)
+            if r.location == NSNotFound { ok += 1 }
+        }
+        return Double(ok) / Double(words.count)
     }
 }
