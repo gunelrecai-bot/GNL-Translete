@@ -65,6 +65,8 @@ final class ListeningEngine {
         guard !running else { return }
         AudioRoute.shared.configure()
         let input = engine.inputNode
+        // İsteğe bağlı gürültü azaltma (telefon görüşmesindeki filtre)
+        try? input.setVoiceProcessingEnabled(AppSettings.shared.noiseReduction)
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in

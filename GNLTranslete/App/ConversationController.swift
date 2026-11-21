@@ -194,11 +194,25 @@ final class ConversationController {
     }
 
     // MARK: Kart oluşturma
+    /// Son sözlerdeki anlamlı kelimeler (isimler, tekrar edenler) → konuşma motoruna ipucu.
+    private func refreshContextHints() {
+        guard AppSettings.shared.contextHints, usesApple else { return }
+        var seen = Set<String>(); var words: [String] = []
+        for t in turns.suffix(10).reversed() {
+            for w in t.heard.components(separatedBy: CharacterSet.letters.inverted) where w.count >= 4 {
+                let k = w.lowercased()
+                if seen.insert(k).inserted { words.append(w) }
+            }
+        }
+        live.updateContext(Array(words.prefix(60)))
+    }
+
     private func handle(_ heard: HeardTurn) async {
         var turn = ConversationTurn(heard: heard.text, heardLanguage: heard.language)
         turn.tone = ToneLexicon.merge(ToneLexicon.analyze(heard.text), ToneLexicon.sentiment(heard.text))
         turn.naturalPending = heard.language == .en
         turns.append(turn)
+        refreshContextHints()
 
         do {
             turn.translation = try await Translator.shared.translate(heard.text, heard.language == .en ? .enToTr : .trToEn)

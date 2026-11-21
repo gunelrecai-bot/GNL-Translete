@@ -146,6 +146,8 @@ final class AppleLiveTranscriber {
         lock.lock(); lanes = built; lock.unlock()
 
         let input = engine.inputNode
+        // İsteğe bağlı gürültü azaltma (telefon görüşmesindeki filtre)
+        try? input.setVoiceProcessingEnabled(AppSettings.shared.noiseReduction)
         let inFormat = input.outputFormat(forBus: 0)
         if let f = analyzerFormat { converter = AVAudioConverter(from: inFormat, to: f) }
         input.removeTap(onBus: 0)
@@ -168,6 +170,17 @@ final class AppleLiveTranscriber {
         tasks = []
         running = false
         inSpeech = false
+    }
+
+    /// Konuya göre ipucu: sohbette geçen kelimeleri motora verir (yalnızca telefonda, kaydedilmez).
+    func updateContext(_ words: [String]) {
+        lock.lock(); let ls = lanes; lock.unlock()
+        guard !ls.isEmpty else { return }
+        Task {
+            let ctx = AnalysisContext()
+            ctx.contextualStrings[.general] = words
+            for l in ls { try? await l.analyzer.setContext(ctx) }
+        }
     }
 
     private static func confidence(_ s: AttributedString) -> Double? {

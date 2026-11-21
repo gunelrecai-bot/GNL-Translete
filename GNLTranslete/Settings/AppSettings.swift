@@ -53,6 +53,8 @@ final class AppSettings {
     /// Hafif mod: doğal İngilizce yalnızca istenince üretilir, telefon daha az yorulur
     var lightMode: Bool { didSet { d.set(lightMode, forKey: "lightMode") } }
     var speechEngine: SpeechEngineChoice { didSet { d.set(speechEngine.rawValue, forKey: "speechEngine") } }
+    var noiseReduction: Bool { didSet { d.set(noiseReduction, forKey: "noiseReduction") } }
+    var contextHints: Bool { didSet { d.set(contextHints, forKey: "contextHints") } }
 
     private init() {
         setupComplete = d.bool(forKey: "setupComplete")
@@ -75,6 +77,8 @@ final class AppSettings {
         autoReadTranslation = d.bool(forKey: "autoRead")
         lightMode = d.object(forKey: "lightMode") as? Bool ?? true
         speechEngine = SpeechEngineChoice(rawValue: d.string(forKey: "speechEngine") ?? "") ?? .apple
+        noiseReduction = d.bool(forKey: "noiseReduction")
+        contextHints = d.object(forKey: "contextHints") as? Bool ?? true
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {

@@ -231,6 +231,8 @@ final class UtteranceRecorder {
         guard !running else { return }
         AudioRoute.shared.configure()
         let input = engine.inputNode
+        // İsteğe bağlı gürültü azaltma (telefon görüşmesindeki filtre)
+        try? input.setVoiceProcessingEnabled(AppSettings.shared.noiseReduction)
         let inFormat = input.outputFormat(forBus: 0)
         converter = AVAudioConverter(from: inFormat, to: outFormat)
         input.removeTap(onBus: 0)

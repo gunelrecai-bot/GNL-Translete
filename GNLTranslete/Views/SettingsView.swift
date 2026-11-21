@@ -15,8 +15,11 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.inline).labelsHidden()
                 .onChange(of: settings.speechEngine) { _, _ in ConversationController.shared.restartListening() }
+                Toggle("Gürültü azaltma", isOn: $s.noiseReduction)
+                    .onChange(of: settings.noiseReduction) { _, _ in ConversationController.shared.restartListening() }
+                Toggle("Konuya göre ipucu (Apple motoru)", isOn: $s.contextHints)
             } header: { Text("Konuşma Motoru") } footer: {
-                Text("Apple: konuşurken anlık yazar, telefona yük bindirmez. Whisper: cümle bitince yazar; hafif Small sürümü telefonun yapay zekâ çipinde çalışır ve yalnızca bu seçenek açıkken belleğe yüklenir, uygulamadan çıkınca bellekten silinir. İlk seçimde ~220 MB iner.")
+                Text("Gürültü azaltma: kalabalık ortamda işe yarar, uzaktaki sesi biraz kısabilir. Konuya göre ipucu: sohbette geçen kelimeler motora verilir, isimler ve tekrar eden kelimeler daha doğru yazılır; hiçbir şey kaydedilmez, gönderilmez. Apple: konuşurken anlık yazar, telefona yük bindirmez. Whisper: cümle bitince yazar; hafif Small sürümü telefonun yapay zekâ çipinde çalışır ve yalnızca bu seçenek açıkken belleğe yüklenir, uygulamadan çıkınca bellekten silinir. İlk seçimde ~220 MB iner.")
             }
             ModelTierSection()
             Section {
