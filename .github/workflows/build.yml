@@ -81,3 +81,13 @@ jobs:
         run: |
           TAG="build-${{ github.run_number }}"
           gh release create "$TAG" GNL-Canli-Ceviri-*.ipa --title "GNL-Translete $TAG" --notes "GNL-Canlı Çeviri — otomatik derleme. AltStore ile yükleyin." --latest
+
+      - name: Eski sürümleri temizle (karışmasın)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          KEEP="build-${{ github.run_number }}"
+          for t in $(gh api "repos/${{ github.repository }}/releases?per_page=50" --jq '.[].tag_name'); do
+            [ "$t" = "$KEEP" ] || gh release delete "$t" --cleanup-tag -y -R "${{ github.repository }}"
+          done
