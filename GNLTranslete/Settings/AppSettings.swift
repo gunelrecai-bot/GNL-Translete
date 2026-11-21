@@ -45,6 +45,8 @@ final class AppSettings {
     var modelTier: ModelTier { didSet { d.set(modelTier.rawValue, forKey: "modelTier") } }
     /// İngilizce sözün Türkçesini kulaklıktan kendiliğinden oku (varsayılan kapalı)
     var autoReadTranslation: Bool { didSet { d.set(autoReadTranslation, forKey: "autoRead") } }
+    /// Hafif mod: doğal İngilizce yalnızca istenince üretilir, telefon daha az yorulur
+    var lightMode: Bool { didSet { d.set(lightMode, forKey: "lightMode") } }
 
     private init() {
         setupComplete = d.bool(forKey: "setupComplete")
@@ -65,6 +67,7 @@ final class AppSettings {
         enSpeed = SpeechSpeed(rawValue: d.string(forKey: "enSpeed") ?? "") ?? .normal
         modelTier = ModelTier(rawValue: d.string(forKey: "modelTier") ?? "") ?? .fast
         autoReadTranslation = d.bool(forKey: "autoRead")
+        lightMode = d.object(forKey: "lightMode") as? Bool ?? true
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {

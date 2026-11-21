@@ -231,7 +231,7 @@ final class UtteranceRecorder {
         } else {
             // gürültü tabanını yavaşça izle
             if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
-            let threshold = max(0.012, noiseFloor * 3.0)
+            let threshold = max(0.02, noiseFloor * 4.0)   // ortam gürültüsü her seferinde konuşma sayılmasın
             let voiced = rms > threshold
             if inSpeech {
                 current += s
@@ -239,7 +239,7 @@ final class UtteranceRecorder {
                 let silence = Double(silenceFrames) / 16000
                 let length = Double(current.count) / 16000
                 if silence >= endSilence || length >= maxUtterance {
-                    if Double(speechFrames) / 16000 >= 0.35 { utterance = current }
+                    if Double(speechFrames) / 16000 >= 0.6 { utterance = current }   // çok kısa sesleri (öksürük, tık) işleme
                     current = []; inSpeech = false; speechFrames = 0; silenceFrames = 0
                 }
             } else if voiced {

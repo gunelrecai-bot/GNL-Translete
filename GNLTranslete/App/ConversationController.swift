@@ -88,6 +88,20 @@ final class ConversationController {
         startIfAllowed()
     }
 
+    private var backgrounded = false
+    func enterBackground() {
+        guard !backgrounded else { return }
+        backgrounded = true
+        overlayPauses += 1
+        stopListening()
+        speech.stopAll()
+    }
+    func enterForeground() {
+        guard backgrounded else { return }
+        backgrounded = false
+        endOverlay(applyResumeSetting: false)
+    }
+
     func setMode(_ m: ConversationMode) { AppSettings.shared.mode = m }
 
     func newConversation() {
@@ -137,8 +151,10 @@ final class ConversationController {
             speech.enqueue(.init(text: turn.translation, lang: .tr, rateFactor: nil, generation: 0, publicSpeaker: false))
         }
 
-        // İngilizce söz: 3. satır doğal İngilizce (arka planda)
-        if heard.language == .en {
+        // İngilizce söz: 3. satır doğal İngilizce (arka planda). Hafif modda yalnızca istenince üretilir.
+        if heard.language == .en && AppSettings.shared.lightMode {
+            if let i = turns.firstIndex(where: { $0.id == turn.id }) { turns[i].naturalPending = false }
+        } else if heard.language == .en {
             let id = turn.id
             let prev = englishHistory(before: id)
             Task {
@@ -171,7 +187,21 @@ final class ConversationController {
     // MARK: Kart düğmeleri
     /// Türkçe sözün İngilizce çevirisini / İngilizce sözün doğal hâlini kulaklıktan okur.
     func speakEnglishLine(of id: UUID, slow: Bool = false) {
-        guard let t = turns.first(where: { $0.id == id }) else { return }
+        guard var t = turns.first(where: { $0.id == id }) else { return }
+        // Hafif mod: doğal İngilizce henüz yoksa şimdi üret
+        if t.heardLanguage == .en && t.natural.isEmpty && !t.naturalPending {
+            t.naturalPending = true; update(t)
+            Task {
+                let nat = await ReplyGenerator.shared.naturalize(t.heard, previous: self.englishHistory(before: id))
+                guard var cur = self.turns.first(where: { $0.id == id }) else { return }
+                cur.naturalPending = false
+                cur.natural = nat?.natural ?? cur.heard
+                if let tone = nat?.tone { cur.tone = ToneLexicon.merge(cur.tone, tone) }
+                self.update(cur)
+                self.speakEnglishLine(of: id, slow: slow)
+            }
+            return
+        }
         let text = t.heardLanguage == .tr ? t.translation : (t.natural.isEmpty ? t.heard : t.natural)
         guard !text.isEmpty else { return }
         speech.stopAll()

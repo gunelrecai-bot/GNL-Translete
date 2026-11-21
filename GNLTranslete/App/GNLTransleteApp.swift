@@ -47,7 +47,9 @@ struct RootView: View {
         }
         .onChange(of: phase) { _, p in
             // arka plana geçişte bağlam korunur; geri gelince ses listesi yenilenir
-            if p == .active { AudioRoute.shared.refresh() }
+            // Arka planda dinleme ve modeller durur: telefon yavaşlamasın, pil bitmesin. Sohbet korunur.
+            if p == .background { ConversationController.shared.enterBackground() }
+            if p == .active { AudioRoute.shared.refresh(); ConversationController.shared.enterForeground() }
         }
     }
 }

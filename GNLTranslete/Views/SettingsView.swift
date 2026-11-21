@@ -11,6 +11,11 @@ struct SettingsView: View {
             NavigationLink { VoiceSettingsView() } label: { Label("Ses ve Konuşma", systemImage: "speaker.wave.2") }
             ModelTierSection()
             Section {
+                Toggle("Hafif mod (önerilen)", isOn: $s.lightMode)
+            } header: { Text("Performans") } footer: {
+                Text("Açıkken 3. satır (doğal İngilizce) yalnızca Doğal İngilizceyi Dinle'ye basınca üretilir; telefon daha az ısınır ve yavaşlamaz. Daha da hafif istersen Kurulum Durumu'ndan Whisper Small'u seç.")
+            }
+            Section {
                 Toggle("İngilizce sözlerin Türkçesini kulaklıktan otomatik oku", isOn: $s.autoReadTranslation)
             } footer: {
                 Text("Kapalıyken kulaklığa yalnızca bastığın düğmelerin sesi gelir.")

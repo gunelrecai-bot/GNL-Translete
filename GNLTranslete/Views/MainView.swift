@@ -188,7 +188,9 @@ struct TurnCard: View {
             if turn.heardLanguage == .en && !turn.isOwnTranslation {
                 if turn.naturalPending {
                     HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Doğal İngilizcesi hazırlanıyor…").font(.footnote).italic() }.opacity(0.7)
-                } else if !turn.natural.isEmpty {
+                } else if turn.natural.isEmpty {
+                    Text("Doğal İngilizcesi için 🔊 düğmesine bas").font(.footnote).italic().opacity(0.6)
+                } else {
                     Label { Text(turn.natural).italic() } icon: { Image(systemName: "checkmark.seal") }
                         .font(.body).foregroundStyle(theme.onCard)
                 }
