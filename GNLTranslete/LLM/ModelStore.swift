@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 enum ModelTier: String, Codable, CaseIterable {
     case fast, quality
@@ -45,6 +46,7 @@ final class ModelStore: NSObject, URLSessionDownloadDelegate {
     private(set) var states: [ModelTier: State] = [.fast: .missing, .quality: .missing]
     private var session: URLSession!
     private var taskTier: [Int: ModelTier] = [:]
+    private var retries: [ModelTier: Int] = [:]
 
     /// Seçili katman; seçili model yoksa indirilmiş olan kullanılır.
     var activeTier: ModelTier {
@@ -67,7 +69,11 @@ final class ModelStore: NSObject, URLSessionDownloadDelegate {
 
     private override init() {
         super.init()
-        session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 180          // yavaş bağlantıda kopmasın
+        cfg.timeoutIntervalForResource = 6 * 3600
+        cfg.waitsForConnectivity = true              // bağlantı gidip gelirse bekle
+        session = URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
         removeOldModels()
         refresh()
     }
@@ -94,9 +100,21 @@ final class ModelStore: NSObject, URLSessionDownloadDelegate {
         let tier = t ?? AppSettings.shared.modelTier
         if case .downloading = states[tier] { return }
         states[tier] = .downloading(0)
-        let task = session.downloadTask(with: LLMModelInfo.of(tier).url)
+        retries[tier] = 0
+        start(tier, resumeData: nil)
+    }
+
+    private func start(_ tier: ModelTier, resumeData: Data?) {
+        let task = resumeData.map { session.downloadTask(withResumeData: $0) } ?? session.downloadTask(with: LLMModelInfo.of(tier).url)
         taskTier[task.taskIdentifier] = tier
+        UIApplication.shared.isIdleTimerDisabled = true   // indirme sürerken ekran kilitlenmesin
         task.resume()
+    }
+
+    private func downloadsFinished() {
+        if !states.values.contains(where: { if case .downloading = $0 { return true }; return false }) {
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
     }
 
     func delete(_ t: ModelTier) {
@@ -120,11 +138,24 @@ final class ModelStore: NSObject, URLSessionDownloadDelegate {
         } catch {
             states[tier] = .failed(error.localizedDescription)
         }
+        downloadsFinished()
     }
 
     func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let tier = taskTier[task.taskIdentifier] else { return }
         taskTier[task.taskIdentifier] = nil
-        if let error { states[tier] = .failed(error.localizedDescription) }
+        guard let error = error as NSError? else { return }
+        // Kopan indirmeyi kaldığı yerden otomatik sürdür (en fazla 8 deneme)
+        let n = (retries[tier] ?? 0) + 1
+        retries[tier] = n
+        if n <= 8 {
+            let resume = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(min(n * 3, 15))) { [weak self] in
+                self?.start(tier, resumeData: resume)
+            }
+        } else {
+            states[tier] = .failed("\(error.localizedDescription) (kod \(error.code)). Wi-Fi'yi kontrol edip tekrar İndir'e bas; kaldığı yerden devam eder.")
+            downloadsFinished()
+        }
     }
 }
