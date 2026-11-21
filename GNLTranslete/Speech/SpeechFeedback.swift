@@ -23,11 +23,15 @@ final class OneShotListener {
         }
     }
 
-    /// Whisper ile tek söz (dil zorlanır). Cümlemi Çevir → Konuş için.
+    /// Tek söz (dil zorlanır). Cümlemi Çevir → Konuş için. Seçili motor kullanılır.
     private var recorder: UtteranceRecorder?
     private var live: AppleLiveTranscriber?
-    func listenWhisper(lang: String, timeout: TimeInterval = 20) async -> HeardTurn? {
-        if AppleSpeechSupport.shared.isReady {
+    func listenOnce(lang: String, timeout: TimeInterval = 20) async -> HeardTurn? {
+        // Kulaklık bağlıysa senin sesini AirPods mikrofonundan al (ağzına yakın, daha isabetli); değilse iPhone mikrofonu
+        AudioRoute.shared.preferHeadsetMic = true
+        defer { AudioRoute.shared.preferHeadsetMic = false; AudioRoute.shared.configure() }
+        let useWhisper = AppSettings.shared.speechEngine == .whisper && WhisperEngine.shared.state == .ready
+        if AppleSpeechSupport.shared.isReady && !useWhisper {
             let l = AppleLiveTranscriber(langs: [lang == "tr" ? .tr : .en])
             l.endSilence = 1.1
             live = l
@@ -39,6 +43,9 @@ final class OneShotListener {
                 DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(nil) }
             }
             return r
+        }
+        guard useWhisper else {
+            return await listen(locale: lang == "tr" ? "tr-TR" : "en-US", timeout: timeout)
         }
         let r = UtteranceRecorder()
         r.endSilence = 1.2

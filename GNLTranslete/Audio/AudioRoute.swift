@@ -10,6 +10,8 @@ final class AudioRoute {
     private(set) var headphonesActive = false
     private(set) var outputName = ""
     private(set) var speakerOverride = false
+    /// Kendi sözün için (Cümlemi Çevir → Konuş): kulaklık bağlıysa AirPods mikrofonu kullanılır.
+    var preferHeadsetMic = false
     var onHeadphonesChanged: ((Bool) -> Void)?
 
     private init() {
@@ -25,9 +27,16 @@ final class AudioRoute {
         let s = AVAudioSession.sharedInstance()
         do {
             // .allowBluetooth (HFP) bilerek eklenmedi: giriş iPhone mikrofonunda kalır, çıkış A2DP ile kulaklığa gider.
-            try s.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP, .mixWithOthers])
+            let headsetMic = preferHeadsetMic && headphonesActive
+            // Normalde .allowBluetooth (HFP) eklenmez: giriş iPhone mikrofonunda kalır, çıkış A2DP ile kulaklığa gider.
+            var opts: AVAudioSession.CategoryOptions = [.allowBluetoothA2DP, .mixWithOthers]
+            if headsetMic { opts.insert(.allowBluetooth) }
+            try s.setCategory(.playAndRecord, mode: .default, options: opts)
             try s.setActive(true)
-            if let mic = s.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+            let inputs = s.availableInputs ?? []
+            if headsetMic, let bt = inputs.first(where: { $0.portType == .bluetoothHFP }) {
+                try s.setPreferredInput(bt)
+            } else if let mic = inputs.first(where: { $0.portType == .builtInMic }) {
                 try s.setPreferredInput(mic)
             }
         } catch {

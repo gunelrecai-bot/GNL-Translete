@@ -66,7 +66,7 @@ struct TranslateMineView: View {
         let c = ConversationController.shared
         c.beginOverlay()
         listening = true
-        let heard = await one.listenWhisper(lang: "tr")
+        let heard = await one.listenOnce(lang: "tr")
         listening = false
         c.endOverlay(applyResumeSetting: false)
         if let heard { text = heard.text; await translate() }
