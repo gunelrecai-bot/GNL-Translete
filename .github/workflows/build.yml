@@ -51,7 +51,7 @@ jobs:
             curl -s "https://huggingface.co/api/models/$r" | grep -o '"license":"[^"]*"' | head -1
           done
           echo "Whisper modelleri:"
-          curl -s "https://huggingface.co/api/models/argmaxinc/whisperkit-coreml" | grep -o 'openai_whisper-large-v3[^/"]*' | sort -u
+          curl -s "https://huggingface.co/api/models/argmaxinc/whisperkit-coreml" | grep -oE 'openai_whisper-(large-v3|small)[^/"]*' | sort -u
 
       - name: Xcode projesini oluştur
         run: xcodegen generate
