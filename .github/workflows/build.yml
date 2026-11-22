@@ -20,6 +20,7 @@ jobs:
         run: cp GNLTranslete/Shared/*.swift Harness/Sources/Harness/
       - name: Konuşma testlerini çalıştır (10 senaryo)
         working-directory: Harness
+        timeout-minutes: 25
         run: swift run -c release Harness
       - uses: actions/upload-artifact@v4
         if: always()

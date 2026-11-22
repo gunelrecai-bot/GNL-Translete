@@ -115,6 +115,16 @@ for l in [DetectedLanguage.tr, .en] {
     } catch { print("Dil dosyası hatası \(l.rawValue):", error) }
 }
 
+/// Takılmaya karşı: işlem süreyi aşarsa beklemeyi bırak
+func withTimeout(_ seconds: Double, _ label: String, _ op: @escaping () async -> Void) async {
+    await withTaskGroup(of: Bool.self) { g in
+        g.addTask { await op(); return true }
+        g.addTask { try? await Task.sleep(for: .seconds(seconds)); return false }
+        if let first = await g.next(), first == false { print("⏱ zaman aşımı:", label) }
+        g.cancelAll()
+    }
+}
+
 func confidence(_ s: AttributedString) -> Double? {
     var sum = 0.0, n = 0
     for run in s.runs { if let c = run.transcriptionConfidence { sum += c; n += 1 } }
@@ -123,8 +133,13 @@ func confidence(_ s: AttributedString) -> Double? {
 
 // MARK: - Bir senaryoyu çalıştır (uygulamadaki akışın aynısı: VAD → finalize → TurnAssembler.finish)
 func runScenario(_ sc: Scenario) async -> [HeardTurn] {
+    print("▶︎", sc.name)
     var audio: [Float] = Array(repeating: 0, count: 8000)
-    for s in sc.segs { audio += speak(s.text, s.lang); audio += Array(repeating: 0, count: Int(s.gap * 16000)) }
+    for s in sc.segs {
+        let v = speak(s.text, s.lang)
+        print("   ses:", s.text, "→", String(format: "%.1f sn", Double(v.count) / 16000))
+        audio += v; audio += Array(repeating: 0, count: Int(s.gap * 16000))
+    }
 
     let langs: [DetectedLanguage] = [.tr, .en]
     let asm = TurnAssembler(langs: langs)
@@ -141,12 +156,15 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         }
         let (stream, cont) = AsyncStream<AnalyzerInput>.makeStream()
         let a = SpeechAnalyzer(modules: [m])
-        do { try await a.start(inputSequence: stream) } catch { print("Analyzer başlatılamadı:", error) }
+        await withTimeout(20, "analyzer start") { do { try await a.start(inputSequence: stream) } catch { print("Analyzer başlatılamadı:", error) } }
         analyzers.append(a); conts.append(cont)
     }
     let ctx = AnalysisContext(); ctx.contextualStrings[.general] = ["Recai"]
-    for a in analyzers { try? await a.setContext(ctx) }
-    let afmt = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: mods) ?? fmt16
+    await withTimeout(10, "setContext") { for a in analyzers { try? await a.setContext(ctx) } }
+    var afmtOpt: AVAudioFormat?
+    await withTimeout(10, "format") { afmtOpt = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: mods) }
+    let afmt = afmtOpt ?? fmt16
+    print("   motor biçimi:", afmt.sampleRate, "Hz")
     guard let conv = AVAudioConverter(from: fmt16, to: afmt) else { print("Dönüştürücü yok"); return [] }
 
     var turns: [HeardTurn] = []
@@ -169,14 +187,14 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
 
         try? await Task.sleep(for: .milliseconds(25))   // gerçek zamanın ~4 katı hızla besle
         if v.endTurn {
-            for a in analyzers { try? await a.finalize(through: nil) }
+            await withTimeout(8, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
             try? await Task.sleep(for: .milliseconds(400))
             if let t = asm.finish(spoken: v.spoken) { turns += LanguageSplitter.split(t) }
         }
         pos += n
     }
     for c in conts { c.finish() }
-    for a in analyzers { await a.cancelAndFinishNow() }
+    await withTimeout(10, "kapat") { for a in analyzers { await a.cancelAndFinishNow() } }
     tasks.forEach { $0.cancel() }
     return turns
 }
