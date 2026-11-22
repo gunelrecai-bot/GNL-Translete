@@ -83,7 +83,7 @@ let scenarios: [Scenario] = [
     .init(name: "8 Restoranda hesap", segs: [.init(text: "Can I have the bill, please?", lang: .en, gap: 1.6)],
           expect: [.init(lang: .en, keywords: ["bill"])]),
     .init(name: "9 Tek kelime: Okay", segs: [.init(text: "Okay.", lang: .en, gap: 1.6)],
-          expect: [.init(lang: .en, keywords: ["okay"])]),
+          expect: [.init(lang: .en, keywords: ["ok|okay"])]),
     .init(name: "10 Türkçe, İngilizce, Türkçe sırayla",
           segs: [.init(text: "Taksi çağırabilir misiniz?", lang: .tr, gap: 1.6),
                  .init(text: "Where is the train station?", lang: .en, gap: 1.6),
@@ -212,7 +212,8 @@ for sc in scenarios {
         let t = turns[i]
         if t.language != e.lang { problems.append("kart \(i + 1) dili \(t.language.rawValue), olması gereken \(e.lang.rawValue)") }
         let txt = normalize(t.text)
-        let missing = e.keywords.filter { !txt.contains(normalize($0)) }
+        // "a|b" → ikisinden biri yeterli (ör. "OK" ve "Okay" aynı şey)
+        let missing = e.keywords.filter { k in !k.split(separator: "|").contains { txt.contains(normalize(String($0))) } }
         if !missing.isEmpty { problems.append("kart \(i + 1)'de eksik: \(missing.joined(separator: ","))") }
         if i > 0 {   // tekrar kontrolü: önceki cümlenin anahtar kelimesi sonraki kartta olmamalı
             for k in sc.expect[i - 1].keywords where txt.contains(normalize(k)) && !e.keywords.contains(k) {
