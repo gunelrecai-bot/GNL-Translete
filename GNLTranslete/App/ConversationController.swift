@@ -242,7 +242,13 @@ final class ConversationController {
         live.updateContext(Array(words.prefix(60)))
     }
 
+    /// Aynı sırada iki dil konuşulduysa her dil ayrı kart olur.
     private func handle(_ heard: HeardTurn) async {
+        let parts = LanguageSplitter.split(heard)
+        for p in parts { await handleOne(p) }
+    }
+
+    private func handleOne(_ heard: HeardTurn) async {
         var turn = ConversationTurn(heard: heard.text, heardLanguage: heard.language)
         turn.tone = ToneLexicon.merge(ToneLexicon.analyze(heard.text), ToneLexicon.sentiment(heard.text))
         turn.naturalPending = heard.language == .en

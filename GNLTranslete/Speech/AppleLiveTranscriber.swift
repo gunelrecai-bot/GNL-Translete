@@ -95,6 +95,10 @@ final class AppleLiveTranscriber {
         var confSum = 0.0
         var confCount = 0
         var votes = 0.0      // canlı önizlemede bu dilin kaç kez önde olduğu (uzunlukla ağırlıklı)
+        /// Önceki karta zaten aktarılmış kısım. Motor bazen bölümü kapatmadan önceki cümleleri tekrar gönderir;
+        /// bu kısım yeni sonuçlardan çıkarılır (kartlarda tekrar ve birikme olmasın).
+        var consumed: [String] = []
+        var rawVolatile = ""   // motorun gönderdiği ham (kırpılmamış) kesinleşmemiş metin
     }
 
     private let engine = AVAudioEngine()
@@ -194,11 +198,38 @@ final class AppleLiveTranscriber {
         return n > 0 ? sum / Double(n) : nil
     }
 
-    private func receive(lane i: Int, text: String, isFinal: Bool, conf: Double?) {
+    private static func words(_ t: String) -> [String] {
+        t.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    }
+    private static func norm(_ w: String) -> String {
+        w.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+    /// text, consumed ile başlıyorsa baştaki o kelimeleri at. (eşleşen kelime sayısı, kalan metin)
+    private static func strip(_ text: String, _ consumed: [String]) -> (matched: Int, rest: String) {
+        let w = words(text)
+        var n = 0
+        while n < min(w.count, consumed.count) && norm(w[n]) == norm(consumed[n]) { n += 1 }
+        // en az yarısı eşleşiyorsa tekrar sayılır
+        guard n > 0, n * 2 >= min(w.count, consumed.count) else { return (0, text) }
+        return (n, w.dropFirst(n).joined(separator: " "))
+    }
+
+    private func receive(lane i: Int, text rawText: String, isFinal: Bool, conf: Double?) {
         lock.lock()
         guard i < lanes.count else { lock.unlock(); return }
+        var text = Self.clean(rawText)
+        lanes[i].rawVolatile = isFinal ? "" : text
+        if !lanes[i].consumed.isEmpty {
+            let r = Self.strip(text, lanes[i].consumed)
+            if r.matched > 0 {
+                text = r.rest
+                if isFinal { lanes[i].consumed = Array(lanes[i].consumed.dropFirst(r.matched)) }
+            } else if isFinal {
+                lanes[i].consumed = []   // yeni bölüm başladı
+            }
+        }
         if isFinal {
-            lanes[i].finalText += (lanes[i].finalText.isEmpty ? "" : " ") + text.trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty { lanes[i].finalText += (lanes[i].finalText.isEmpty ? "" : " ") + text }
             lanes[i].volatileText = ""
             if let conf { lanes[i].confSum += conf; lanes[i].confCount += 1 }
         } else {
@@ -263,12 +294,26 @@ final class AppleLiveTranscriber {
         lock.lock()
         let snapshot = lanes
         for i in lanes.indices {
+            let used = (lanes[i].finalText + " " + lanes[i].volatileText).trimmingCharacters(in: .whitespaces)
+            // yalnızca kesinleşmemiş (volatile) kısım tekrar gelebilir; onu "tüketildi" say
+            lanes[i].consumed = lanes[i].rawVolatile.isEmpty ? [] : Self.words(lanes[i].rawVolatile)
+            _ = used
             lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0; lanes[i].votes = 0
         }
+        let analyzers = lanes.map(\.analyzer)
         lock.unlock()
+        // Motorun açık bölümünü kapat: sonraki sonuçlar temiz başlasın
+        Task { for a in analyzers { try? await a.finalize(through: nil) } }
         guard spoken >= 0.4, let best = Self.decide(snapshot, final: true),
               !best.text.isEmpty, best.text.filter(\.isLetter).count >= 2 else { return }
         onTurn?(best)
+    }
+
+    /// Baştaki "- " gibi işaretleri temizle
+    static func clean(_ t: String) -> String {
+        var s = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let f = s.first, "-–—•".contains(f) { s.removeFirst(); s = s.trimmingCharacters(in: .whitespaces) }
+        return s
     }
 
     /// Canlı önizleme için hızlı seçim (yazım denetimi yok).
