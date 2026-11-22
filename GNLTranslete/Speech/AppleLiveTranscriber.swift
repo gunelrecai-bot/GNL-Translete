@@ -84,21 +84,12 @@ final class AppleSpeechSupport {
     }
 }
 
-/// Canlı dinleme motoru (Apple). Sıra bitince en olası dildeki metni verir.
+/// Canlı dinleme motoru (Apple). Mikrofon sesini motorlara verir; metinden karta dönüşüm TurnAssembler'da.
 final class AppleLiveTranscriber {
     private struct Lane {
         let lang: DetectedLanguage
         let analyzer: SpeechAnalyzer
         let input: AsyncStream<AnalyzerInput>.Continuation
-        var finalText = ""
-        var volatileText = ""
-        var confSum = 0.0
-        var confCount = 0
-        var votes = 0.0      // canlı önizlemede bu dilin kaç kez önde olduğu (uzunlukla ağırlıklı)
-        /// Önceki karta zaten aktarılmış kısım. Motor bazen bölümü kapatmadan önceki cümleleri tekrar gönderir;
-        /// bu kısım yeni sonuçlardan çıkarılır (kartlarda tekrar ve birikme olmasın).
-        var consumed: [String] = []
-        var rawVolatile = ""   // motorun gönderdiği ham (kırpılmamış) kesinleşmemiş metin
     }
 
     private let engine = AVAudioEngine()
@@ -107,33 +98,32 @@ final class AppleLiveTranscriber {
     private var converter: AVAudioConverter?
     private var analyzerFormat: AVAudioFormat?
     private let lock = NSLock()
-
-    private var inSpeech = false
-    private var silence: TimeInterval = 0
-    private var speechTime: TimeInterval = 0
-    private var noiseFloor: Float = 0.006
-    private var lastChange = Date()
+    private var assembler: TurnAssembler
 
     var langs: [DetectedLanguage]
-    var endSilence: TimeInterval = 0.8
+    var endSilence: TimeInterval = 0.8 { didSet { assembler.endSilence = endSilence } }
     var isMuted: () -> Bool = { false }
     var onPartial: ((String) -> Void)?
     var onTurn: ((HeardTurn) -> Void)?
     var onLevel: ((Float, Bool) -> Void)?
     private(set) var running = false
 
-    init(langs: [DetectedLanguage] = [.tr, .en]) { self.langs = langs }
+    init(langs: [DetectedLanguage] = [.tr, .en]) {
+        self.langs = langs
+        assembler = TurnAssembler(langs: langs)
+    }
 
     func start() async throws {
         guard !running else { return }
         AudioRoute.shared.configure()
+        assembler = TurnAssembler(langs: langs)
+        assembler.endSilence = endSilence
         var built: [Lane] = []
         var modules: [any SpeechModule] = []
         let dict = AppleSpeechSupport.shared.turkishViaDictation
         for (i, l) in langs.enumerated() {
             let m = AppleSpeechSupport.module(for: l, dictation: dict, volatile: true)
             modules.append(m)
-            // sonuçları dinle (modül türüne göre)
             if let t = m as? SpeechTranscriber {
                 tasks.append(Task { [weak self] in
                     do { for try await r in t.results { self?.receive(lane: i, text: String(r.text.characters), isFinal: r.isFinal, conf: Self.confidence(r.text)) } } catch {}
@@ -176,7 +166,6 @@ final class AppleLiveTranscriber {
         tasks.forEach { $0.cancel() }
         tasks = []
         running = false
-        inSpeech = false
     }
 
     /// Konuya göre ipucu: sohbette geçen kelimeleri motora verir (yalnızca telefonda, kaydedilmez).
@@ -190,7 +179,7 @@ final class AppleLiveTranscriber {
         }
     }
 
-    private static func confidence(_ s: AttributedString) -> Double? {
+    static func confidence(_ s: AttributedString) -> Double? {
         var sum = 0.0, n = 0
         for run in s.runs {
             if let c = run.transcriptionConfidence { sum += c; n += 1 }
@@ -198,50 +187,8 @@ final class AppleLiveTranscriber {
         return n > 0 ? sum / Double(n) : nil
     }
 
-    private static func words(_ t: String) -> [String] {
-        t.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-    }
-    private static func norm(_ w: String) -> String {
-        w.lowercased().filter { $0.isLetter || $0.isNumber }
-    }
-    /// text, consumed ile başlıyorsa baştaki o kelimeleri at. (eşleşen kelime sayısı, kalan metin)
-    private static func strip(_ text: String, _ consumed: [String]) -> (matched: Int, rest: String) {
-        let w = words(text)
-        var n = 0
-        while n < min(w.count, consumed.count) && norm(w[n]) == norm(consumed[n]) { n += 1 }
-        // en az yarısı eşleşiyorsa tekrar sayılır
-        guard n > 0, n * 2 >= min(w.count, consumed.count) else { return (0, text) }
-        return (n, w.dropFirst(n).joined(separator: " "))
-    }
-
-    private func receive(lane i: Int, text rawText: String, isFinal: Bool, conf: Double?) {
-        lock.lock()
-        guard i < lanes.count else { lock.unlock(); return }
-        var text = Self.clean(rawText)
-        lanes[i].rawVolatile = isFinal ? "" : text
-        if !lanes[i].consumed.isEmpty {
-            let r = Self.strip(text, lanes[i].consumed)
-            if r.matched > 0 {
-                text = r.rest
-                if isFinal { lanes[i].consumed = Array(lanes[i].consumed.dropFirst(r.matched)) }
-            } else if isFinal {
-                lanes[i].consumed = []   // yeni bölüm başladı
-            }
-        }
-        if isFinal {
-            if !text.isEmpty { lanes[i].finalText += (lanes[i].finalText.isEmpty ? "" : " ") + text }
-            lanes[i].volatileText = ""
-            if let conf { lanes[i].confSum += conf; lanes[i].confCount += 1 }
-        } else {
-            lanes[i].volatileText = text
-        }
-        lastChange = Date()
-        let previewTurn = bestLocked()
-        if let p = previewTurn, let k = lanes.firstIndex(where: { $0.lang == p.language }) {
-            lanes[k].votes += Double(p.text.count)
-        }
-        let preview = previewTurn?.text ?? ""
-        lock.unlock()
+    private func receive(lane i: Int, text: String, isFinal: Bool, conf: Double?) {
+        let preview = assembler.receive(lane: i, text: text, isFinal: isFinal, conf: conf)
         DispatchQueue.main.async { if !preview.isEmpty { self.onPartial?(preview) } }
     }
 
@@ -252,19 +199,8 @@ final class AppleLiveTranscriber {
         var sum: Float = 0
         for k in 0..<n { sum += ch[k] * ch[k] }
         let rms = sqrt(sum / Float(max(n, 1)))
-        let dur = Double(n) / buf.format.sampleRate
-
-        // VAD: sıra sonu tespiti
-        if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
-        let voiced = !muted && rms > max(0.02, noiseFloor * 4)
-        var endTurn = false
-        if voiced { inSpeech = true; silence = 0; speechTime += dur }
-        else if inSpeech {
-            silence += dur
-            if silence >= endSilence { endTurn = true; inSpeech = false; silence = 0 }
-        }
-        let speaking = inSpeech
-        DispatchQueue.main.async { self.onLevel?(rms, speaking) }
+        let v = assembler.vad(rms: rms, duration: Double(n) / buf.format.sampleRate, muted: muted)
+        DispatchQueue.main.async { self.onLevel?(rms, v.speaking) }
 
         if !muted, let converter, let fmt = analyzerFormat {
             let cap = AVAudioFrameCount(Double(buf.frameLength) * fmt.sampleRate / buf.format.sampleRate + 32)
@@ -282,85 +218,17 @@ final class AppleLiveTranscriber {
             }
         }
 
-        if endTurn {
-            let spoken = speechTime
-            speechTime = 0
-            // son kelimelerin kesinleşmesi için kısa bekleme
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.finishTurn(spoken: spoken) }
-        }
-    }
-
-    private func finishTurn(spoken: TimeInterval) {
-        lock.lock()
-        let snapshot = lanes
-        for i in lanes.indices {
-            let used = (lanes[i].finalText + " " + lanes[i].volatileText).trimmingCharacters(in: .whitespaces)
-            // yalnızca kesinleşmemiş (volatile) kısım tekrar gelebilir; onu "tüketildi" say
-            lanes[i].consumed = lanes[i].rawVolatile.isEmpty ? [] : Self.words(lanes[i].rawVolatile)
-            _ = used
-            lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0; lanes[i].votes = 0
-        }
-        let analyzers = lanes.map(\.analyzer)
-        lock.unlock()
-        // Motorun açık bölümünü kapat: sonraki sonuçlar temiz başlasın
-        Task { for a in analyzers { try? await a.finalize(through: nil) } }
-        guard spoken >= 0.4, let best = Self.decide(snapshot, final: true),
-              !best.text.isEmpty, best.text.filter(\.isLetter).count >= 2 else { return }
-        onTurn?(best)
-    }
-
-    /// Baştaki "- " gibi işaretleri temizle
-    static func clean(_ t: String) -> String {
-        var s = t.trimmingCharacters(in: .whitespacesAndNewlines)
-        while let f = s.first, "-–—•".contains(f) { s.removeFirst(); s = s.trimmingCharacters(in: .whitespaces) }
-        return s
-    }
-
-    /// Canlı önizleme için hızlı seçim (yazım denetimi yok).
-    private func bestLocked() -> HeardTurn? { Self.decide(lanes, final: false) }
-
-    /// Dil seçimi. Yanlış dildeki motor genellikle sözlükte olmayan kelimeler üretir
-    /// ("merhaba" → "Madama"); bu yüzden asıl ölçüt: kelimelerin o dilin sözlüğünde olması.
-    /// Ek ölçütler: metnin dili (NaturalLanguage), canlı önizlemedeki önde olma oyu, (ikisinde de varsa) motor güveni.
-    private static func decide(_ lanes: [Lane], final: Bool) -> HeardTurn? {
-        let texts = lanes.map { ($0.finalText + " " + $0.volatileText).trimmingCharacters(in: .whitespaces) }
-        let bothConf = lanes.allSatisfy { $0.confCount > 0 }
-        let totalVotes = max(1, lanes.map(\.votes).reduce(0, +))
-        var best: (HeardTurn, Double)?
-        for (i, l) in lanes.enumerated() {
-            let text = texts[i]
-            guard !text.isEmpty else { continue }
-            let conf = l.confCount > 0 ? l.confSum / Double(l.confCount) : 0.5
-            let nl = NLLanguageRecognizer()
-            nl.languageConstraints = [.turkish, .english]
-            nl.processString(text)
-            let match = nl.languageHypotheses(withMaximum: 2)[l.lang == .tr ? .turkish : .english] ?? 0
-            var score: Double
-            if final {
-                let valid = dictionaryRatio(text, lang: l.lang)
-                score = valid * 0.5 + match * 0.3 + (l.votes / totalVotes) * 0.2
-                if bothConf { score = score * 0.85 + conf * 0.15 }
-            } else {
-                score = match * 0.7 + (bothConf ? conf * 0.3 : 0.15)
+        if v.endTurn {
+            // Önce motorlara "bu ana kadarki sesi kesinleştir" de, kesin sonuçlar gelsin; sonra kartı üret.
+            lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()
+            let spoken = v.spoken
+            Task { [weak self] in
+                for a in analyzers { try? await a.finalize(through: nil) }
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self else { return }
+                let turn = self.assembler.finish(spoken: spoken)
+                DispatchQueue.main.async { if let turn { self.onTurn?(turn) } }
             }
-            if best == nil || score > best!.1 { best = (HeardTurn(text: text, language: l.lang, confidence: Float(conf)), score) }
         }
-        return best?.0
-    }
-
-    /// Kelimelerin ne kadarı o dilin sözlüğünde var (0…1).
-    static func dictionaryRatio(_ text: String, lang: DetectedLanguage) -> Double {
-        let code = lang == .tr ? "tr_TR" : "en_US"
-        guard UITextChecker.availableLanguages.contains(code) else { return 0.5 }
-        let words = text.components(separatedBy: CharacterSet.letters.inverted).filter { $0.count >= 2 }
-        guard !words.isEmpty else { return 0 }
-        let checker = UITextChecker()
-        var ok = 0
-        for w in words {
-            let r = checker.rangeOfMisspelledWord(in: w, range: NSRange(location: 0, length: (w as NSString).length),
-                                                  startingAt: 0, wrap: false, language: code)
-            if r.location == NSNotFound { ok += 1 }
-        }
-        return Double(ok) / Double(words.count)
     }
 }

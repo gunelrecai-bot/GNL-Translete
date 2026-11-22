@@ -9,7 +9,26 @@ permissions:
   contents: write
 
 jobs:
+  speech-tests:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode sürümünü seç
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Paylaşılan mantığı teste kopyala
+        run: cp GNLTranslete/Shared/*.swift Harness/Sources/Harness/
+      - name: Konuşma testlerini çalıştır (10 senaryo)
+        working-directory: Harness
+        run: swift run -c release Harness
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: konusma-test-raporu
+          path: Harness/test-report.md
+
   build:
+    needs: speech-tests
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4

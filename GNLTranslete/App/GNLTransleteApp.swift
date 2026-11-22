@@ -42,6 +42,7 @@ struct RootView: View {
         .environment(\.theme, theme)
         .tint(theme.accent)
         .task {
+            SpellSetup.install()
             // Apple motoru hazırsa Whisper hiç belleğe alınmaz; yalnızca yedek olarak diskte bekler
             await AppleSpeechSupport.shared.check()
             ConversationController.shared.restartListening()

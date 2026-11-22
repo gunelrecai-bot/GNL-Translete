@@ -2,18 +2,7 @@ import AVFoundation
 import Speech
 import NaturalLanguage
 
-struct HeardTurn {
-    let text: String
-    let language: DetectedLanguage
-    let confidence: Float
-}
-
 struct DeviceSpeechStatus: Hashable { let locale: String; let ready: Bool }
-
-enum DetectedLanguage: String, Codable {
-    case tr, en, mixed
-    var title: String { switch self { case .tr: "Türkçe"; case .en: "İngilizce"; case .mixed: "Karışık" } }
-}
 
 /// Sürekli dinleme: Türkçe ve İngilizce cihaz içi tanıyıcılar aynı sesi paralel işler.
 /// Konuşma sırasının bitişi sessizlik + metin ipuçlarıyla algılanır.
