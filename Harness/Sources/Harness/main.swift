@@ -27,6 +27,7 @@ func run(_ cmd: String, _ args: [String]) -> String {
     try? p.run(); p.waitUntilExit()
     return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
 }
+print("Başlıyor…")
 let voices = run("/usr/bin/say", ["-v", "?"])
 func voice(_ prefix: String, prefer: [String]) -> String? {
     let lines = voices.split(separator: "\n").map(String.init).filter { $0.contains(prefix) }
@@ -47,8 +48,8 @@ func speak(_ text: String, _ lang: DetectedLanguage) -> [Float] {
     guard let f = try? AVAudioFile(forReading: url),
           let src = AVAudioPCMBuffer(pcmFormat: f.processingFormat, frameCapacity: AVAudioFrameCount(f.length)) else { return [] }
     try? f.read(into: src)
-    let conv = AVAudioConverter(from: f.processingFormat, to: fmt16)!
-    let out = AVAudioPCMBuffer(pcmFormat: fmt16, frameCapacity: AVAudioFrameCount(Double(f.length) * 16000 / f.processingFormat.sampleRate + 1024))!
+    guard let conv = AVAudioConverter(from: f.processingFormat, to: fmt16),
+          let out = AVAudioPCMBuffer(pcmFormat: fmt16, frameCapacity: AVAudioFrameCount(Double(f.length) * 16000 / f.processingFormat.sampleRate + 1024)) else { return [] }
     var fed = false
     conv.convert(to: out, error: nil) { _, st in if fed { st.pointee = .endOfStream; return nil }; fed = true; st.pointee = .haveData; return src }
     let s = Array(UnsafeBufferPointer(start: out.floatChannelData![0], count: Int(out.frameLength)))
@@ -93,12 +94,16 @@ let scenarios: [Scenario] = [
 // MARK: - Motorlar
 let trLoc = Locale(identifier: "tr-TR"), enLoc = Locale(identifier: "en-US")
 let stSupported = await SpeechTranscriber.supportedLocales.map { $0.identifier(.bcp47) }
-let trViaDictation = !stSupported.contains { $0.hasPrefix("tr") }
-print("Türkçe motoru:", trViaDictation ? "Dikte (DictationTranscriber)" : "SpeechTranscriber", "· SpeechTranscriber kullanılabilir:", SpeechTranscriber.isAvailable)
+// Bu Mac sunucusunda Apple'ın yeni motoru yoksa (sanal makine) iki dil de Dikte motoruyla test edilir;
+// test edilen asıl şey uygulamanın karar/ayıklama/bölme mantığıdır.
+let newEngine = SpeechTranscriber.isAvailable
+let trViaDictation = !newEngine || !stSupported.contains { $0.hasPrefix("tr") }
+let enViaDictation = !newEngine
+print("Türkçe motoru:", trViaDictation ? "Dikte" : "Yeni motor", "· İngilizce motoru:", enViaDictation ? "Dikte" : "Yeni motor")
 
 func module(_ l: DetectedLanguage) -> any SpeechModule {
-    if l == .tr && trViaDictation {
-        return DictationTranscriber(locale: trLoc, contentHints: [], transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.transcriptionConfidence])
+    if (l == .tr && trViaDictation) || (l == .en && enViaDictation) {
+        return DictationTranscriber(locale: l == .tr ? trLoc : enLoc, contentHints: [], transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.transcriptionConfidence])
     }
     return SpeechTranscriber(locale: l == .tr ? trLoc : enLoc, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.transcriptionConfidence])
 }
@@ -142,7 +147,7 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
     let ctx = AnalysisContext(); ctx.contextualStrings[.general] = ["Recai"]
     for a in analyzers { try? await a.setContext(ctx) }
     let afmt = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: mods) ?? fmt16
-    let conv = AVAudioConverter(from: fmt16, to: afmt)!
+    guard let conv = AVAudioConverter(from: fmt16, to: afmt) else { print("Dönüştürücü yok"); return [] }
 
     var turns: [HeardTurn] = []
     let chunk = 1600
@@ -157,7 +162,7 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         let rms = sqrt(sum / Float(n))
         let v = asm.vad(rms: rms, duration: Double(n) / 16000, muted: false)
 
-        let out = AVAudioPCMBuffer(pcmFormat: afmt, frameCapacity: AVAudioFrameCount(Double(n) * afmt.sampleRate / 16000 + 64))!
+        guard let out = AVAudioPCMBuffer(pcmFormat: afmt, frameCapacity: AVAudioFrameCount(Double(n) * afmt.sampleRate / 16000 + 64)) else { pos += n; continue }
         var fed = false
         conv.convert(to: out, error: nil) { _, st in if fed { st.pointee = .noDataNow; return nil }; fed = true; st.pointee = .haveData; return buf }
         if out.frameLength > 0 { for c in conts { c.yield(AnalyzerInput(buffer: out)) } }
