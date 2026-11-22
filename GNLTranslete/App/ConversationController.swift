@@ -113,6 +113,7 @@ final class ConversationController {
                 do {
                     try await live.start()
                     if tok != startToken { live.stop() }   // bu arada durduruldu ya da motor değişti
+                    else { refreshContextHints() }         // isimler ve konu ipuçları baştan verilsin
                 } catch {
                     guard tok == startToken else { return }
                     errorText = "Apple konuşma motoru açılamadı, yedek kullanılıyor"
@@ -230,9 +231,13 @@ final class ConversationController {
 
     // MARK: Kart oluşturma
     /// Son sözlerdeki anlamlı kelimeler (isimler, tekrar edenler) → konuşma motoruna ipucu.
-    private func refreshContextHints() {
-        guard AppSettings.shared.contextHints, usesApple else { return }
+    func refreshContextHints() {
+        guard usesApple else { return }
         var seen = Set<String>(); var words: [String] = []
+        // Sık kullanılan isimler her zaman başta
+        for n in AppSettings.shared.nameList where seen.insert(n.lowercased()).inserted { words.append(n) }
+        guard AppSettings.shared.contextHints || !words.isEmpty else { return }
+        if !AppSettings.shared.contextHints { live.updateContext(words); return }
         for t in turns.suffix(10).reversed() {
             for w in t.heard.components(separatedBy: CharacterSet.letters.inverted) where w.count >= 4 {
                 let k = w.lowercased()

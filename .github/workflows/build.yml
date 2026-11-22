@@ -88,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          KEEP="build-${{ github.run_number }}"
-          for t in $(gh api "repos/${{ github.repository }}/releases?per_page=50" --jq '.[].tag_name'); do
-            [ "$t" = "$KEEP" ] || gh release delete "$t" --cleanup-tag -y -R "${{ github.repository }}"
+          # Son 3 sürüm kalsın: yeni sürüm sorun çıkarırsa bir öncekine dönülebilsin
+          for t in $(gh api "repos/${{ github.repository }}/releases?per_page=50" --jq '.[3:][].tag_name'); do
+            gh release delete "$t" --cleanup-tag -y -R "${{ github.repository }}"
           done

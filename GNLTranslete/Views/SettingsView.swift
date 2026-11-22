@@ -28,6 +28,13 @@ struct SettingsView: View {
                 Toggle("Gürültü azaltma", isOn: $s.noiseReduction)
                     .onChange(of: settings.noiseReduction) { _, _ in ConversationController.shared.restartListening() }
                 Toggle("Konuya göre ipucu (Apple motoru)", isOn: $s.contextHints)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sık kullandığım isimler")
+                    TextField("Örn: Recai, Ayşe, Kurtköy", text: $s.customNames, axis: .vertical)
+                        .textInputAutocapitalization(.words)
+                        .onSubmit { ConversationController.shared.refreshContextHints() }
+                    Text("Virgülle ayır. Konuşma motoru bu isimleri doğru yazmaya çalışır.").font(.caption).foregroundStyle(.secondary)
+                }
             } header: { Text("Konuşma Motoru") } footer: {
                 Text("Gürültü azaltma: kalabalık ortamda işe yarar, uzaktaki sesi biraz kısabilir. Konuya göre ipucu: sohbette geçen kelimeler motora verilir, isimler ve tekrar eden kelimeler daha doğru yazılır; hiçbir şey kaydedilmez, gönderilmez. Apple: konuşurken anlık yazar, telefona yük bindirmez. Whisper: cümle bitince yazar; yalnızca bu seçenek açıkken belleğe yüklenir, uygulamadan çıkınca bellekten silinir. Seçtiğin boyut ilk seferde iner; menüyü kapatınca hazırlanır.")
             }

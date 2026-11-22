@@ -55,6 +55,12 @@ final class AppSettings {
     var speechEngine: SpeechEngineChoice { didSet { d.set(speechEngine.rawValue, forKey: "speechEngine") } }
     var noiseReduction: Bool { didSet { d.set(noiseReduction, forKey: "noiseReduction") } }
     var contextHints: Bool { didSet { d.set(contextHints, forKey: "contextHints") } }
+    /// Sık kullanılan isimler (virgülle): motor bunları doğru yazmaya çalışır
+    var customNames: String { didSet { d.set(customNames, forKey: "customNames") } }
+    var nameList: [String] {
+        customNames.split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
 
     private init() {
         setupComplete = d.bool(forKey: "setupComplete")
@@ -79,6 +85,7 @@ final class AppSettings {
         speechEngine = SpeechEngineChoice(rawValue: d.string(forKey: "speechEngine") ?? "") ?? .apple
         noiseReduction = d.bool(forKey: "noiseReduction")
         contextHints = d.object(forKey: "contextHints") as? Bool ?? true
+        customNames = d.string(forKey: "customNames") ?? ""
     }
 
     private func save<T: Encodable>(_ v: T, _ key: String) {
