@@ -104,14 +104,19 @@ struct MainView: View {
                 // Canlı metin / "konuşma algılandı" alanı: sabit yükseklikte, listeyi oynatmaz
                 HStack(spacing: 8) {
                     Image(systemName: "waveform").symbolEffect(.variableColor, isActive: convo.hearingSpeech)
-                    Text(!convo.partial.isEmpty ? convo.partial
-                         : (convo.transcribing > 0 ? "Yazıya dökülüyor…" : (convo.hearingSpeech ? "Konuşma algılandı…" : " ")))
-                        .italic().lineLimit(2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(!convo.partial.isEmpty ? convo.partial
+                             : (convo.transcribing > 0 ? "Yazıya dökülüyor…" : (convo.hearingSpeech ? "Konuşma algılandı…" : " ")))
+                            .lineLimit(1).truncationMode(.head)
+                        // konuşurken akan anlık çeviri
+                        Text(convo.partialTranslation.isEmpty ? " " : convo.partialTranslation)
+                            .italic().fontWeight(.semibold).lineLimit(1).truncationMode(.head)
+                    }
                     Spacer(minLength: 0)
                 }
                 .font(.subheadline)
                 .padding(.horizontal, 12)
-                .frame(height: 48)
+                .frame(height: 58)
                 .foregroundStyle(theme.onCard.opacity(0.8))
                 .background(theme.card.opacity(convo.hearingSpeech || convo.transcribing > 0 || !convo.partial.isEmpty ? 0.6 : 0.15),
                             in: RoundedRectangle(cornerRadius: 14))
@@ -130,8 +135,15 @@ struct MainView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 9)
                     .background(theme.chrome, in: Capsule())
             }
+            Button { convo.listenMode.toggle() } label: {
+                Label("Dinleme", systemImage: convo.listenMode ? "ear.fill" : "ear")
+                    .padding(.vertical, 9).padding(.horizontal, 12)
+                    .background(convo.listenMode ? theme.accent : theme.chrome, in: Capsule())
+                    .foregroundStyle(convo.listenMode ? theme.onAccent : theme.onBg)
+            }
+            .accessibilityHint("Açıkken İngilizce konuşmaların Türkçesi kulaklıktan kendiliğinden okunur")
             Button { showHint = true } label: {
-                Label(convo.hint.isEmpty ? "Türkçe İpucu" : "İpucu: \(convo.hint)", systemImage: "lightbulb")
+                Label(convo.hint.isEmpty ? "İpucu" : "İpucu: \(convo.hint)", systemImage: "lightbulb")
                     .lineLimit(1)
                     .frame(maxWidth: .infinity).padding(.vertical, 9)
                     .background(theme.chrome, in: Capsule())

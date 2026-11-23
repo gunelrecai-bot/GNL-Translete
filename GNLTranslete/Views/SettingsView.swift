@@ -45,7 +45,7 @@ struct SettingsView: View {
                 Text("Açıkken 3. satır (doğal İngilizce) yalnızca Doğal İngilizceyi Dinle'ye basınca üretilir; telefon daha az ısınır ve yavaşlamaz.")
             }
             Section {
-                Toggle("İngilizce sözlerin Türkçesini kulaklıktan otomatik oku", isOn: $s.autoReadTranslation)
+                Toggle("Dinleme Modu: İngilizce sözlerin Türkçesini kulaklıktan otomatik oku", isOn: $s.autoReadTranslation)
             } footer: {
                 Text("Kapalıyken kulaklığa yalnızca bastığın düğmelerin sesi gelir.")
             }

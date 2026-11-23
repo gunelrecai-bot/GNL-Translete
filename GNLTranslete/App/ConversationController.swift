@@ -43,6 +43,11 @@ final class ConversationController {
     private let fallback = ListeningEngine()
     private let live = AppleLiveTranscriber()
     private(set) var partial = ""
+    /// Konuşurken akan anlık çeviri
+    private(set) var partialTranslation = ""
+    private var liveTranslating = false
+    private var pendingLive: HeardTurn?
+    private var lastLiveAt = Date.distantPast
     /// Apple'ın yeni motoru hazırsa o, değilse Whisper kullanılır.
     var usesApple: Bool { AppleSpeechSupport.shared.isReady && AppSettings.shared.speechEngine == .apple }
     private let speech = SpeechOutput.shared
@@ -66,8 +71,11 @@ final class ConversationController {
         live.isMuted = { @Sendable in rt.speakerOverride || (sp.isSpeaking && !rt.headphonesActive) }
         live.onLevel = { [weak self] _, s in self?.setHearing(s) }
         live.onPartial = { [weak self] t in self?.partial = t }
+        live.onPartialTurn = { [weak self] t in self?.liveTranslate(t) }
         live.onTurn = { [weak self] heard in
             self?.partial = ""
+            self?.partialTranslation = ""
+            self?.pendingLive = nil
             Task { await self?.handle(heard) }
         }
         route.onHeadphonesChanged = { [weak self] on in
@@ -143,6 +151,7 @@ final class ConversationController {
         recorder.stop()
         fallback.stop()
         live.stop()
+        partialTranslation = ""
         // Apple'a dönüldüyse Whisper'ı bellekten çıkar
         if usesApple { WhisperEngine.shared.unload() }
         partial = ""
@@ -245,6 +254,33 @@ final class ConversationController {
             }
         }
         live.updateContext(Array(words.prefix(60)))
+    }
+
+    /// Konuşma sürerken önizlemeyi çevir (en sık 0,5 sn'de bir; yalnızca en son metin).
+    private func liveTranslate(_ t: HeardTurn) {
+        guard t.text.split(separator: " ").count >= 2 else { return }
+        if liveTranslating || Date().timeIntervalSince(lastLiveAt) < 0.5 { pendingLive = t; scheduleLiveRetry(); return }
+        liveTranslating = true
+        lastLiveAt = Date()
+        Task {
+            let out = (try? await Translator.shared.translate(t.text, t.language == .en ? .enToTr : .trToEn)) ?? ""
+            liveTranslating = false
+            if !partial.isEmpty { partialTranslation = out }   // sıra bittiyse eski çeviriyi gösterme
+            if let p = pendingLive { pendingLive = nil; liveTranslate(p) }
+        }
+    }
+    private func scheduleLiveRetry() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+            guard let self, !self.liveTranslating, let p = self.pendingLive else { return }
+            self.pendingLive = nil
+            self.liveTranslate(p)
+        }
+    }
+
+    /// Dinleme Modu: karşıdakinin İngilizce sözlerinin Türkçesi kendiliğinden kulaklıktan okunur.
+    var listenMode: Bool {
+        get { AppSettings.shared.autoReadTranslation }
+        set { AppSettings.shared.autoReadTranslation = newValue }
     }
 
     /// Aynı sırada iki dil konuşulduysa her dil ayrı kart olur.

@@ -20,6 +20,8 @@ final class TurnAssembler {
 
     private(set) var lanes: [LaneState]
     private let lock = NSLock()
+    /// Son canlı önizleme (metin + dil): konuşurken anlık çeviri için
+    private(set) var lastPreview: HeardTurn?
 
     // VAD
     var endSilence: TimeInterval = 0.8
@@ -93,6 +95,7 @@ final class TurnAssembler {
         if let p = preview, let k = lanes.firstIndex(where: { $0.lang == p.language }) {
             lanes[k].votes += Double(p.text.count)
         }
+        lastPreview = preview
         return preview?.text ?? ""
     }
 
@@ -100,6 +103,7 @@ final class TurnAssembler {
     func finish(spoken: TimeInterval) -> HeardTurn? {
         lock.lock()
         let snapshot = lanes
+        lastPreview = nil
         for i in lanes.indices {
             lanes[i].consumed = lanes[i].rawVolatile.isEmpty ? [] : Self.words(lanes[i].rawVolatile)
             lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0; lanes[i].votes = 0

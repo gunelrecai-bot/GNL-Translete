@@ -104,6 +104,7 @@ final class AppleLiveTranscriber {
     var endSilence: TimeInterval = 0.8 { didSet { assembler.endSilence = endSilence } }
     var isMuted: () -> Bool = { false }
     var onPartial: ((String) -> Void)?
+    var onPartialTurn: ((HeardTurn) -> Void)?
     var onTurn: ((HeardTurn) -> Void)?
     var onLevel: ((Float, Bool) -> Void)?
     private(set) var running = false
@@ -189,7 +190,11 @@ final class AppleLiveTranscriber {
 
     private func receive(lane i: Int, text: String, isFinal: Bool, conf: Double?) {
         let preview = assembler.receive(lane: i, text: text, isFinal: isFinal, conf: conf)
-        DispatchQueue.main.async { if !preview.isEmpty { self.onPartial?(preview) } }
+        let turn = assembler.lastPreview
+        DispatchQueue.main.async {
+            if !preview.isEmpty { self.onPartial?(preview) }
+            if let turn { self.onPartialTurn?(turn) }
+        }
     }
 
     private func process(_ buf: AVAudioPCMBuffer) {

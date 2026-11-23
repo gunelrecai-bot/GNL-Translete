@@ -60,6 +60,8 @@ final class SpeechOutput: NSObject, AVSpeechSynthesizerDelegate {
     // MARK: Kuyruk
     func enqueue(_ item: Item) {
         if !item.publicSpeaker && !AudioRoute.shared.headphonesActive { return } // hoparlöre özel ses verme
+        // Konuşma hızlı akarsa en eski bekleyenleri at: ses gerçek konuşmanın gerisinde kalmasın
+        while queue.count >= 3, let i = queue.firstIndex(where: { !$0.publicSpeaker }) { queue.remove(at: i) }
         queue.append(item)
         pump()
     }
