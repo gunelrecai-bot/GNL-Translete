@@ -38,11 +38,14 @@ final class TurnAssembler {
     private var clock: TimeInterval = 0
     private var lastGrowth: TimeInterval = 0
     private var lastWordCount = 0
+    private var lastCutSince: TimeInterval = 0
     var minSegmentWords = 6
     private var sinceSegment: TimeInterval = 0
     private var pauseFired = false
     /// Kesme kararı verildi ama kelimenin ortasında kesmemek için ilk ses inişi bekleniyor
-    private var pendingCut: (carry: Bool, waited: TimeInterval)?
+    private var pendingCut: (force: Bool, waited: TimeInterval)?
+    /// Kesmede cümle bitmemişti, metin bekletildi → konuşma süresi sıfırlanmasın
+    private var restoreSince: TimeInterval = 0
     private var inSpeech = false
     private var silence: TimeInterval = 0
     private(set) var speechTime: TimeInterval = 0
@@ -53,7 +56,7 @@ final class TurnAssembler {
     }
 
     // MARK: Sessizlik / sıra sonu
-    struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false; var carryTail = false }
+    struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false; var carryTail = false; var forceCut = false }
 
     func vad(rms: Float, duration: TimeInterval, muted: Bool, dipRms: Float? = nil) -> VADResult {
         if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
@@ -62,6 +65,8 @@ final class TurnAssembler {
         var spoken: TimeInterval = 0
         var mid = false
         var carry = false
+        var force = false
+        lock.lock(); if restoreSince > 0 { sinceSegment += restoreSince; restoreSince = 0 }; lock.unlock()
         lock.lock(); clock += duration; let stalled = clock - lastGrowth >= stallTime; lock.unlock()
         if voiced {
             inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration
@@ -71,34 +76,34 @@ final class TurnAssembler {
             if var p = pendingCut {
                 // kelimeler arası kısa iniş (20 ms'lik pencerede) → kes; gelmezse en fazla 2,5 sn bekle
                 p.waited += duration; pendingCut = p
-                if dip || p.waited >= 2.5 { mid = true; carry = p.carry; pendingCut = nil; sinceSegment = 0 }
+                if dip || p.waited >= 2.5 { mid = true; carry = true; force = p.force; pendingCut = nil; lastCutSince = sinceSegment; sinceSegment = 0 }
             } else if ready && previewCompleteSentences >= sentencesPerCard {
                 // es vermeden konuşuyor: tamamlanan cümleleri çevir, yarım cümle sonraki karta kalsın
-                pendingCut = (true, 0); pauseFired = false
+                pendingCut = (false, 0); pauseFired = false
             } else if !pauseFired && ready && (stalled || previewEndsWithFiller) {
                 // ses sürüyor ama kelime gelmiyor ya da "eee/ımm": es gibi say
                 pendingCut = (false, 0); pauseFired = true
             } else if (sinceSegment >= maxSegmentSpeech || words >= maxSegmentWords) && words >= minSegmentWords {
                 // canlı yazıda noktalama yoksa: kesinleştirince gelen noktalamaya göre son tam cümlede kes,
                 // yarım kalan cümle sonraki karta taşınır
-                pendingCut = (true, 0)
+                pendingCut = (true, 0)   // süre/kelime sınırı: cümle bitmese de kes
             }
             if !stalled && !previewEndsWithFiller { pauseFired = false }
         } else if inSpeech {
             silence += duration
             if let p = pendingCut, silence < endSilence {
                 // kelimeler arasındaki ilk kısa iniş: burada kes (kelime bölünmez)
-                mid = true; carry = p.carry; pendingCut = nil; sinceSegment = 0
+                mid = true; carry = true; force = p.force; pendingCut = nil; lastCutSince = sinceSegment; sinceSegment = 0
             } else if silence >= endSilence {
                 pendingCut = nil
                 // son karttan bu yana konuşulan süre: parça kesildiyse artakalan motor çöpü kart olmaz
                 end = true; inSpeech = false; silence = 0; spoken = sinceSegment; speechTime = 0; sinceSegment = 0; pauseFired = false
             }
             else if !mid && !pauseFired && silence >= pauseSilence && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords {
-                mid = true; pauseFired = true; sinceSegment = 0
+                mid = true; carry = true; pauseFired = true; lastCutSince = sinceSegment; sinceSegment = 0
             }
         }
-        return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken, midSegment: mid, carryTail: carry)
+        return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken, midSegment: mid, carryTail: carry, forceCut: force)
     }
 
     static let fillers: Set<String> = ["um", "umm", "uh", "uhh", "uhm", "hmm", "hm", "mm", "mmm", "er", "erm", "ah", "eh",
@@ -111,6 +116,10 @@ final class TurnAssembler {
         return Self.isFiller(w)
     }
 
+    static let openEnders: Set<String> = [
+        "the","a","an","to","of","and","or","but","in","on","at","for","with","from","by","my","your","our","their","his","her",
+        "is","are","was","were","be","i","we","you","they","he","she","it","that","this","because","so","if","when","as","than","about",
+        "ve","veya","ama","fakat","ile","için","bir","çok","daha","en","de","da","ki","gibi","kadar","diye","çünkü","eğer","hem","ya","şu","bu","o"]
     static func isSentenceEnd(_ w: String) -> Bool { guard let c = w.last else { return false }; return ".?!…".contains(c) }
     /// Önizlemede, arkasından başka söz gelmiş (tamamlanmış) cümle sayısı
     var previewCompleteSentences: Int {
@@ -177,7 +186,7 @@ final class TurnAssembler {
     }
 
     /// Sıra bitti: kartı üret, şeritleri sıfırla.
-    func finish(spoken: TimeInterval, carryTail: Bool = false) -> HeardTurn? {
+    func finish(spoken: TimeInterval, carryTail: Bool = false, forceCut: Bool = false) -> HeardTurn? {
         lock.lock()
         let snapshot = lanes
         lastPreview = nil
@@ -190,11 +199,27 @@ final class TurnAssembler {
         }
         var decided = Self.decide(snapshot, final: true)
         if carryTail, let d = decided {
+            // Kesme cümle sonuna denk gelsin: tam cümleler karta, yarım kalan kısım hafızada (sonraki karta)
             let ws = Self.words(d.text)
-            if let last = ws.lastIndex(where: Self.isSentenceEnd), last < ws.count - 1 {
-                tail = ws[(last + 1)...].joined(separator: " ")
-                decided = HeardTurn(text: ws[...last].joined(separator: " "), language: d.language, confidence: d.confidence)
+            func open(_ i: Int) -> Bool { i >= 0 && openEnders.contains(norm(ws[i]).lowercased(with: Locale(identifier: "tr"))) }
+            var cutAt: Int? = nil   // bu indekse kadar (dahil) karta gider
+            let terms = ws.indices.filter { Self.isSentenceEnd(ws[$0]) && !open($0) }
+            if let last = terms.last { cutAt = last }
+            else if forceCut || !open(ws.count - 1) {
+                // motor noktalama koymamış: zorunlu kesmede ya da cümle açık bitmiyorsa hepsi gider
+                if forceCut || !ws.contains(where: Self.isSentenceEnd) { cutAt = ws.count - 1 }
+            }
+            if let c = cutAt {
+                if c < ws.count - 1 {
+                    tail = ws[(c + 1)...].joined(separator: " ")
+                    decided = HeardTurn(text: ws[...c].joined(separator: " "), language: d.language, confidence: d.confidence)
+                    tailLane = lanes.firstIndex { $0.lang == d.language }
+                }
+            } else {
+                // cümle hiç bitmemiş: hepsini hafızada tut, konuşma sürdükçe tamamlanacak
+                tail = d.text; decided = nil
                 tailLane = lanes.firstIndex { $0.lang == d.language }
+                restoreSince = lastCutSince
             }
         }
         if let k = tailLane { lanes[k].finalText = tail }

@@ -234,12 +234,12 @@ final class AppleLiveTranscriber {
             // Konuşmacı susmadan, nefes arasında: o ana kadarki kısmı kart yap, dinlemeye devam et
             segmenting = true
             lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()
-            let carry = v.carryTail
+            let carry = v.carryTail, force = v.forceCut
             Task { [weak self] in
                 for a in analyzers { try? await a.finalize(through: nil) }
                 try? await Task.sleep(for: .milliseconds(200))
                 guard let self else { return }
-                let turn = self.assembler.finish(spoken: 1.0, carryTail: carry)
+                let turn = self.assembler.finish(spoken: 1.0, carryTail: carry, forceCut: force)
                 self.segmenting = false
                 DispatchQueue.main.async { if let turn { self.onTurn?(turn) } }
             }
