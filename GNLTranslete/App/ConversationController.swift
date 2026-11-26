@@ -362,7 +362,9 @@ final class ConversationController {
         let text = t.heardLanguage == .tr ? t.translation : (t.natural.isEmpty ? t.heard : t.natural)
         guard !text.isEmpty else { return }
         speech.stopAll()
-        speech.enqueue(.init(text: text, lang: .en, rateFactor: slow ? 0.7 : 1.0, generation: 0, publicSpeaker: false))
+        // Dinle düğmesine basıldı: kulaklık yoksa telefonun hoparlöründen çal (o sırada mikrofon dinlemez)
+        speech.enqueue(.init(text: text, lang: .en, rateFactor: slow ? 0.7 : 1.0, generation: 0,
+                             publicSpeaker: !AudioRoute.shared.headphonesActive))
     }
 
     /// Cevap Ver: seçilen söze cevap üret, kartın altına yaz ve kulaklıktan oku.
@@ -392,7 +394,9 @@ final class ConversationController {
 
     func replay(_ text: String, slow: Bool) {
         speech.stopAll()
-        speech.enqueue(.init(text: text, lang: .en, rateFactor: slow ? 0.7 : 1.0, generation: 0, publicSpeaker: false))
+        // Dinle düğmesine basıldı: kulaklık yoksa telefonun hoparlöründen çal (o sırada mikrofon dinlemez)
+        speech.enqueue(.init(text: text, lang: .en, rateFactor: slow ? 0.7 : 1.0, generation: 0,
+                             publicSpeaker: !AudioRoute.shared.headphonesActive))
     }
 
     // MARK: Cümlemi Çevir

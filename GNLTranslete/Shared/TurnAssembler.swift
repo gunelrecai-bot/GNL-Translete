@@ -201,7 +201,7 @@ final class TurnAssembler {
         if carryTail, let d = decided {
             // Kesme cümle sonuna denk gelsin: tam cümleler karta, yarım kalan kısım hafızada (sonraki karta)
             let ws = Self.words(d.text)
-            func open(_ i: Int) -> Bool { i >= 0 && openEnders.contains(norm(ws[i]).lowercased(with: Locale(identifier: "tr"))) }
+            func open(_ i: Int) -> Bool { i >= 0 && Self.openEnders.contains(Self.norm(ws[i]).lowercased(with: Locale(identifier: "tr"))) }
             var cutAt: Int? = nil   // bu indekse kadar (dahil) karta gider
             let terms = ws.indices.filter { Self.isSentenceEnd(ws[$0]) && !open($0) }
             if let last = terms.last { cutAt = last }
