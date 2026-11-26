@@ -26,10 +26,10 @@ final class TurnAssembler {
     // VAD
     var endSilence: TimeInterval = 0.8
     /// Uzun konuşmada ara kesme: kısa duraklama (nefes) + yeterince söz birikince parça kartı üretilir
-    var pauseSilence: TimeInterval = 0.35
-    var minSegmentSpeech: TimeInterval = 2.0
+    var pauseSilence: TimeInterval = 0.4
+    var minSegmentSpeech: TimeInterval = 2.5
     var maxSegmentSpeech: TimeInterval = 10.0
-    var minSegmentWords = 6
+    var minSegmentWords = 7
     private var sinceSegment: TimeInterval = 0
     private var pauseFired = false
     private var inSpeech = false

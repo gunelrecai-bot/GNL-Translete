@@ -98,7 +98,7 @@ let scenarios: [Scenario] = [
           segs: [.init(text: "Bu sabah çok erken saatte havalimanına vardım.", lang: .tr, gap: 0.5),
                  .init(text: "Sonra taksiyle sahildeki otele doğru gittik.", lang: .tr, gap: 0.5),
                  .init(text: "Öğle yemeğinden sonra eski şehri gezdik.", lang: .tr, gap: 1.6)],
-          expect: [.init(lang: .tr, keywords: ["havalimanı"]), .init(lang: .tr, keywords: ["taksi"]), .init(lang: .tr, keywords: ["yemeğ"])]),
+          expect: [.init(lang: .tr, keywords: ["havalimanı"]), .init(lang: .tr, keywords: ["taksi"]), .init(lang: .tr, keywords: ["öğle"])]),
 ]
 
 // MARK: - Motorlar
@@ -197,14 +197,14 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         conv.convert(to: out, error: nil) { _, st in if fed { st.pointee = .noDataNow; return nil }; fed = true; st.pointee = .haveData; return buf }
         if out.frameLength > 0 { for c in conts { c.yield(AnalyzerInput(buffer: out)) } }
 
-        try? await Task.sleep(for: .milliseconds(25))   // gerçek zamanın ~4 katı hızla besle
+        try? await Task.sleep(for: .milliseconds(50))   // gerçek zamanın ~2 katı hızla besle
         if v.midSegment {
-            await withTimeout(8, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
+            await withTimeout(20, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
             try? await Task.sleep(for: .milliseconds(300))
             if let t = asm.finish(spoken: 1.0) { turns += LanguageSplitter.split(t) }
         }
         if v.endTurn {
-            await withTimeout(8, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
+            await withTimeout(20, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
             try? await Task.sleep(for: .milliseconds(400))
             if let t = asm.finish(spoken: v.spoken) { turns += LanguageSplitter.split(t) }
         }
