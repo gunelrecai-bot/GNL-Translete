@@ -27,7 +27,7 @@ final class TurnAssembler {
     var endSilence: TimeInterval = 0.8
     /// Uzun konuşmada ara kesme: kısa duraklama (nefes) + yeterince söz birikince parça kartı üretilir
     var pauseSilence: TimeInterval = 0.4
-    var minSegmentSpeech: TimeInterval = 2.5
+    var minSegmentSpeech: TimeInterval = 2.0
     var maxSegmentSpeech: TimeInterval = 8.0
     /// Es vermeden bu kadar kelime birikirse de (yaklaşık 2 cümle) kes
     var maxSegmentWords = 24
@@ -59,7 +59,7 @@ final class TurnAssembler {
     private var speechLevel: Float = 0.06
     /// Bu tamponun kaç kat yükseltileceği (uzaktaki/kısık konuşmacı için en fazla 8 kat)
     func gain(for rms: Float) -> Float {
-        if rms > 0.002 { speechLevel = 0.92 * speechLevel + 0.08 * rms }
+        if rms > 0.002 { speechLevel = 0.8 * speechLevel + 0.2 * rms }
         return min(8, max(1, 0.06 / max(speechLevel, 0.001)))
     }
 
