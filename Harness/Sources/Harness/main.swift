@@ -58,7 +58,7 @@ func speak(_ text: String, _ lang: DetectedLanguage) -> [Float] {
 }
 
 // MARK: - Senaryolar
-struct Seg { let text: String; let lang: DetectedLanguage; let gap: Double }
+struct Seg { let text: String; let lang: DetectedLanguage; let gap: Double; var vol: Float = 1 }
 struct Expect { let lang: DetectedLanguage; let keywords: [String] }
 struct Scenario { let name: String; let segs: [Seg]; let expect: [Expect]; var flexible = false }
 
@@ -103,6 +103,10 @@ let scenarios: [Scenario] = [
           segs: [.init(text: "I arrived at the airport very early this morning. Then I took a taxi to the hotel near the beach. After lunch we visited the old town. In the evening we had dinner by the sea.", lang: .en, gap: 1.6)],
           expect: [.init(lang: .en, keywords: ["airport"]), .init(lang: .en, keywords: ["taxi"]), .init(lang: .en, keywords: ["lunch", "old town"]), .init(lang: .en, keywords: ["evening", "dinner"])],
           flexible: true),
+    .init(name: "15 Kısık ses (uzaktaki hoparlör), iki cümle",
+          segs: [.init(text: "Good morning everyone, thanks for joining us today.", lang: .en, gap: 0.6, vol: 0.12),
+                 .init(text: "Please have a look at the menu on the table.", lang: .en, gap: 1.6, vol: 0.12)],
+          expect: [.init(lang: .en, keywords: ["morning"]), .init(lang: .en, keywords: ["menu"])], flexible: true),
     .init(name: "14 Cümle ortasında duraklama (bölünmemeli, tek kart)",
           segs: [.init(text: "Yesterday afternoon my wife and I went together to the", lang: .en, gap: 0.55),
                  .init(text: "big shopping mall with my family.", lang: .en, gap: 1.6)],
@@ -158,7 +162,7 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
     for s in sc.segs {
         let v = speak(s.text, s.lang)
         print("   ses:", s.text, "→", String(format: "%.1f sn", Double(v.count) / 16000))
-        audio += v; audio += Array(repeating: 0, count: Int(s.gap * 16000))
+        audio += v.map { $0 * s.vol }; audio += Array(repeating: 0, count: Int(s.gap * 16000))
     }
 
     let langs: [DetectedLanguage] = [.tr, .en]
@@ -199,7 +203,10 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         for k in 0..<n { sum += audio[pos + k] * audio[pos + k] }
         let rms = sqrt(sum / Float(n))
         let dip = audio.withUnsafeBufferPointer { minWindowRms($0.baseAddress! + pos, n, 16000) }
-        let v = asm.vad(rms: rms, duration: Double(n) / 16000, muted: false, dipRms: dip)
+        // uygulamadaki gibi: kısık sesi yükselt, sessizlik kararı yükseltilmiş sesle
+        let g = asm.gain(for: rms)
+        if g > 1.05 { let p = buf.floatChannelData![0]; for k in 0..<n { p[k] = max(-1, min(1, p[k] * g)) } }
+        let v = asm.vad(rms: rms * g, duration: Double(n) / 16000, muted: false, dipRms: dip * g)
 
         guard let out = AVAudioPCMBuffer(pcmFormat: afmt, frameCapacity: AVAudioFrameCount(Double(n) * afmt.sampleRate / 16000 + 64)) else { pos += n; continue }
         var fed = false

@@ -55,6 +55,14 @@ final class TurnAssembler {
         lanes = langs.map { LaneState(lang: $0) }
     }
 
+    // MARK: Otomatik kazanç (kısık ses)
+    private var speechLevel: Float = 0.06
+    /// Bu tamponun kaç kat yükseltileceği (uzaktaki/kısık konuşmacı için en fazla 8 kat)
+    func gain(for rms: Float) -> Float {
+        if rms > 0.002 { speechLevel = 0.92 * speechLevel + 0.08 * rms }
+        return min(8, max(1, 0.06 / max(speechLevel, 0.001)))
+    }
+
     // MARK: Sessizlik / sıra sonu
     struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false; var carryTail = false; var forceCut = false }
 
@@ -118,8 +126,7 @@ final class TurnAssembler {
 
     static let openEnders: Set<String> = [
         "the","a","an","to","of","and","or","but","in","on","at","for","with","from","by","my","your","our","their","his","her",
-        "is","are","was","were","be","i","we","you","they","he","she","it","that","this","because","so","if","when","as","than","about",
-        "ve","veya","ama","fakat","ile","için","bir","çok","daha","en","de","da","ki","gibi","kadar","diye","çünkü","eğer","hem","ya","şu","bu","o"]
+        "because","if","than","ve","veya","ama","fakat","ile","için","bir","çünkü","eğer","hem"]
     static func isSentenceEnd(_ w: String) -> Bool { guard let c = w.last else { return false }; return ".?!…".contains(c) }
     /// Önizlemede, arkasından başka söz gelmiş (tamamlanmış) cümle sayısı
     var previewCompleteSentences: Int {
@@ -224,7 +231,8 @@ final class TurnAssembler {
         }
         if let k = tailLane { lanes[k].finalText = tail }
         lock.unlock()
-        guard spoken >= 0.4, var best = decided else { return nil }
+        guard var best = decided else { return nil }
+        guard spoken >= 0.4 || Self.words(best.text).count >= 3 else { return nil }
         best = HeardTurn(text: Self.dropFillers(best.text), language: best.language, confidence: best.confidence)
         guard best.text.filter(\.isLetter).count >= 2 else { return nil }
         return best

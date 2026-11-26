@@ -106,7 +106,6 @@ final class AppleLiveTranscriber {
     var onPartial: ((String) -> Void)?
     var onPartialTurn: ((HeardTurn) -> Void)?
     private var segmenting = false
-    private var speechLevel: Float = 0.06
     var onTurn: ((HeardTurn) -> Void)?
     var onLevel: ((Float, Bool) -> Void)?
     private(set) var running = false
@@ -207,11 +206,10 @@ final class AppleLiveTranscriber {
         for k in 0..<n { sum += ch[k] * ch[k] }
         let rms = sqrt(sum / Float(max(n, 1)))
         let dip = minWindowRms(ch, n, buf.format.sampleRate)   // yükseltmeden önce ölç
-        // Kısık gelen sesi (uzaktaki konuşmacı, bilgisayar hoparlörü) motora yükseltilmiş ver
-        if rms > 0.004 { speechLevel = 0.9 * speechLevel + 0.1 * rms }
-        let gain = min(6, max(1, 0.06 / max(speechLevel, 0.001)))
+        // Kısık gelen sesi (uzaktaki konuşmacı, bilgisayar hoparlörü) yükselt; sessizlik kararı da yükseltilmiş sesle
+        let gain = assembler.gain(for: rms)
         if gain > 1.05 { for k in 0..<n { ch[k] = max(-1, min(1, ch[k] * gain)) } }
-        let v = assembler.vad(rms: rms, duration: Double(n) / buf.format.sampleRate, muted: muted, dipRms: dip)
+        let v = assembler.vad(rms: rms * gain, duration: Double(n) / buf.format.sampleRate, muted: muted, dipRms: dip * gain)
         DispatchQueue.main.async { self.onLevel?(rms, v.speaking) }
 
         if !muted, let converter, let fmt = analyzerFormat {
