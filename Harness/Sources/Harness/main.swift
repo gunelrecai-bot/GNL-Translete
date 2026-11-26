@@ -60,7 +60,7 @@ func speak(_ text: String, _ lang: DetectedLanguage) -> [Float] {
 // MARK: - Senaryolar
 struct Seg { let text: String; let lang: DetectedLanguage; let gap: Double }
 struct Expect { let lang: DetectedLanguage; let keywords: [String] }
-struct Scenario { let name: String; let segs: [Seg]; let expect: [Expect] }
+struct Scenario { let name: String; let segs: [Seg]; let expect: [Expect]; var flexible = false }
 
 let scenarios: [Scenario] = [
     .init(name: "1 Türkçe tanışma", segs: [.init(text: "Merhaba, benim adım Recai.", lang: .tr, gap: 1.6)],
@@ -99,6 +99,10 @@ let scenarios: [Scenario] = [
                  .init(text: "Sonra taksiyle sahildeki otele doğru gittik.", lang: .tr, gap: 0.5),
                  .init(text: "Öğle yemeğinden sonra eski şehri gezdik.", lang: .tr, gap: 1.6)],
           expect: [.init(lang: .tr, keywords: ["havalimanı"]), .init(lang: .tr, keywords: ["taksi"]), .init(lang: .tr, keywords: ["öğle"])]),
+    .init(name: "13 Hiç es vermeden 4 cümle (cümle sonlarında bölünmeli, kayıp/tekrar yok)",
+          segs: [.init(text: "I arrived at the airport very early this morning. Then I took a taxi to the hotel near the beach. After lunch we visited the old town. In the evening we had dinner by the sea.", lang: .en, gap: 1.6)],
+          expect: [.init(lang: .en, keywords: ["airport"]), .init(lang: .en, keywords: ["taxi"]), .init(lang: .en, keywords: ["lunch"]), .init(lang: .en, keywords: ["dinner"])],
+          flexible: true),
 ]
 
 // MARK: - Motorlar
@@ -113,7 +117,7 @@ print("Türkçe motoru:", trViaDictation ? "Dikte" : "Yeni motor", "· İngilizc
 
 func module(_ l: DetectedLanguage) -> any SpeechModule {
     if (l == .tr && trViaDictation) || (l == .en && enViaDictation) {
-        return DictationTranscriber(locale: l == .tr ? trLoc : enLoc, contentHints: [], transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.transcriptionConfidence])
+        return DictationTranscriber(locale: l == .tr ? trLoc : enLoc, contentHints: [], transcriptionOptions: [.punctuation], reportingOptions: [.volatileResults], attributeOptions: [.transcriptionConfidence])
     }
     return SpeechTranscriber(locale: l == .tr ? trLoc : enLoc, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.transcriptionConfidence])
 }
@@ -197,11 +201,11 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         conv.convert(to: out, error: nil) { _, st in if fed { st.pointee = .noDataNow; return nil }; fed = true; st.pointee = .haveData; return buf }
         if out.frameLength > 0 { for c in conts { c.yield(AnalyzerInput(buffer: out)) } }
 
-        try? await Task.sleep(for: .milliseconds(50))   // gerçek zamanın ~2 katı hızla besle
+        try? await Task.sleep(for: .milliseconds(100))   // gerçek zamanlı besle (telefondaki gibi)
         if v.midSegment {
             await withTimeout(20, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
             try? await Task.sleep(for: .milliseconds(300))
-            if let t = asm.finish(spoken: 1.0) { turns += LanguageSplitter.split(t) }
+            if let t = asm.finish(spoken: 1.0, carryTail: v.carryTail) { turns += LanguageSplitter.split(t) }
         }
         if v.endTurn {
             await withTimeout(20, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
@@ -224,8 +228,20 @@ var report = "## Konuşma testleri\n\n| # | Senaryo | Sonuç | Kartlar |\n|---|-
 for sc in scenarios {
     let turns = await runScenario(sc)
     var problems: [String] = []
-    if turns.count != sc.expect.count { problems.append("beklenen \(sc.expect.count) kart, çıkan \(turns.count)") }
-    for (i, e) in sc.expect.enumerated() where i < turns.count {
+    if sc.flexible {
+        // kart sayısı serbest (en az 2); tüm anahtar kelimeler sırayla ve birer kez geçmeli, hepsi doğru dilde
+        if turns.count < 2 { problems.append("hiç bölünmedi (\(turns.count) kart)") }
+        if let bad = turns.first(where: { $0.language != sc.expect[0].lang }) { problems.append("yanlış dil: \(bad.text)") }
+        let all = normalize(turns.map(\.text).joined(separator: " "))
+        var from = all.startIndex
+        for k in sc.expect.flatMap(\.keywords) {
+            let nk = normalize(k)
+            let count = all.components(separatedBy: nk).count - 1
+            if count == 0 { problems.append("kayıp: \(k)") } else if count > 1 { problems.append("tekrar: \(k)") }
+            if let r = all.range(of: nk, range: from..<all.endIndex) { from = r.upperBound } else if count > 0 { problems.append("sıra bozuk: \(k)") }
+        }
+    } else if turns.count != sc.expect.count { problems.append("beklenen \(sc.expect.count) kart, çıkan \(turns.count)") }
+    for (i, e) in sc.expect.enumerated() where i < turns.count && !sc.flexible {
         let t = turns[i]
         if t.language != e.lang { problems.append("kart \(i + 1) dili \(t.language.rawValue), olması gereken \(e.lang.rawValue)") }
         let txt = normalize(t.text)

@@ -28,7 +28,14 @@ final class TurnAssembler {
     /// Uzun konuşmada ara kesme: kısa duraklama (nefes) + yeterince söz birikince parça kartı üretilir
     var pauseSilence: TimeInterval = 0.4
     var minSegmentSpeech: TimeInterval = 2.5
-    var maxSegmentSpeech: TimeInterval = 10.0
+    var maxSegmentSpeech: TimeInterval = 15.0
+    /// Ses var ama yeni kelime gelmiyor ("eee", "ımm" uzatması) → bu süreden sonra es sayılır
+    var stallTime: TimeInterval = 1.0
+    /// Hiç es vermeden konuşulursa her kaç tamamlanmış cümlede bir kart çıksın
+    var sentencesPerCard = 2
+    private var clock: TimeInterval = 0
+    private var lastGrowth: TimeInterval = 0
+    private var lastWordCount = 0
     var minSegmentWords = 6
     private var sinceSegment: TimeInterval = 0
     private var pauseFired = false
@@ -42,7 +49,7 @@ final class TurnAssembler {
     }
 
     // MARK: Sessizlik / sıra sonu
-    struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false }
+    struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false; var carryTail = false }
 
     func vad(rms: Float, duration: TimeInterval, muted: Bool) -> VADResult {
         if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
@@ -50,14 +57,22 @@ final class TurnAssembler {
         var end = false
         var spoken: TimeInterval = 0
         var mid = false
+        var carry = false
+        lock.lock(); clock += duration; let stalled = clock - lastGrowth >= stallTime; lock.unlock()
         if voiced {
-            inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration; pauseFired = false
-            // hiç durmadan çok uzun konuşma: yine de parça ver
-            if sinceSegment >= maxSegmentSpeech && previewWords >= minSegmentWords { mid = true; sinceSegment = 0 }
-            // "eee", "ımm", "um" gibi dolgu sesi: konuşmacı düşünüyor, o ana kadarkini çevir
-            else if !pauseFired && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords + 1 && previewEndsWithFiller {
+            inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration
+            let words = previewWords
+            let ready = sinceSegment >= minSegmentSpeech && words >= minSegmentWords
+            if ready && previewCompleteSentences >= sentencesPerCard {
+                // es vermeden konuşuyor: tamamlanan cümleleri çevir, yarım cümle sonraki karta kalsın
+                mid = true; carry = true; sinceSegment = 0; pauseFired = false
+            } else if !pauseFired && ready && (stalled || previewEndsWithFiller) {
+                // ses sürüyor ama kelime gelmiyor ya da "eee/ımm": es gibi say
                 mid = true; pauseFired = true; sinceSegment = 0
+            } else if sinceSegment >= maxSegmentSpeech && words >= minSegmentWords {
+                mid = true; sinceSegment = 0   // son güvenlik: noktalama da yoksa
             }
+            if !stalled && !previewEndsWithFiller { pauseFired = false }
         } else if inSpeech {
             silence += duration
             if silence >= endSilence {
@@ -68,7 +83,7 @@ final class TurnAssembler {
                 mid = true; pauseFired = true; sinceSegment = 0
             }
         }
-        return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken, midSegment: mid)
+        return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken, midSegment: mid, carryTail: carry)
     }
 
     static let fillers: Set<String> = ["um", "umm", "uh", "uhh", "uhm", "hmm", "hm", "mm", "mmm", "er", "erm", "ah", "eh",
@@ -79,6 +94,14 @@ final class TurnAssembler {
         lock.lock(); defer { lock.unlock() }
         guard let w = lastPreview.map({ Self.words($0.text) })?.last else { return false }
         return Self.isFiller(w)
+    }
+
+    static func isSentenceEnd(_ w: String) -> Bool { guard let c = w.last else { return false }; return ".?!…".contains(c) }
+    /// Önizlemede, arkasından başka söz gelmiş (tamamlanmış) cümle sayısı
+    var previewCompleteSentences: Int {
+        lock.lock(); defer { lock.unlock() }
+        guard let ws = lastPreview.map({ Self.words($0.text) }), ws.count > 1 else { return 0 }
+        return ws.dropLast().filter(Self.isSentenceEnd).count
     }
 
     /// Şu an birikmiş (henüz karta dönmemiş) önizlemenin kelime sayısı
@@ -133,20 +156,35 @@ final class TurnAssembler {
             lanes[k].votes += Double(p.text.count)
         }
         lastPreview = preview
+        let wc = preview.map { Self.words($0.text).count } ?? 0
+        if wc != lastWordCount { lastWordCount = wc; lastGrowth = clock }
         return preview?.text ?? ""
     }
 
     /// Sıra bitti: kartı üret, şeritleri sıfırla.
-    func finish(spoken: TimeInterval) -> HeardTurn? {
+    func finish(spoken: TimeInterval, carryTail: Bool = false) -> HeardTurn? {
         lock.lock()
         let snapshot = lanes
         lastPreview = nil
+        lastWordCount = 0; lastGrowth = clock
+        var tail = ""
+        var tailLane: Int?
         for i in lanes.indices {
             lanes[i].consumed = lanes[i].rawVolatile.isEmpty ? [] : Self.words(lanes[i].rawVolatile)
             lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0; lanes[i].votes = 0
         }
+        var decided = Self.decide(snapshot, final: true)
+        if carryTail, let d = decided {
+            let ws = Self.words(d.text)
+            if let last = ws.lastIndex(where: Self.isSentenceEnd), last < ws.count - 1 {
+                tail = ws[(last + 1)...].joined(separator: " ")
+                decided = HeardTurn(text: ws[...last].joined(separator: " "), language: d.language, confidence: d.confidence)
+                tailLane = lanes.firstIndex { $0.lang == d.language }
+            }
+        }
+        if let k = tailLane { lanes[k].finalText = tail }
         lock.unlock()
-        guard spoken >= 0.4, var best = Self.decide(snapshot, final: true) else { return nil }
+        guard spoken >= 0.4, var best = decided else { return nil }
         best = HeardTurn(text: Self.dropFillers(best.text), language: best.language, confidence: best.confidence)
         guard best.text.filter(\.isLetter).count >= 2 else { return nil }
         return best

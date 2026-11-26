@@ -25,7 +25,7 @@ final class AppleSpeechSupport {
         let loc = lang == .tr ? tr : en
         let rep: Set<SpeechTranscriber.ReportingOption> = volatile ? [.volatileResults] : []
         if lang == .tr && dictation {
-            return DictationTranscriber(locale: loc, contentHints: [], transcriptionOptions: [],
+            return DictationTranscriber(locale: loc, contentHints: [], transcriptionOptions: [.punctuation],
                                         reportingOptions: volatile ? [.volatileResults] : [],
                                         attributeOptions: [.transcriptionConfidence])
         }
@@ -233,11 +233,12 @@ final class AppleLiveTranscriber {
             // Konuşmacı susmadan, nefes arasında: o ana kadarki kısmı kart yap, dinlemeye devam et
             segmenting = true
             lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()
+            let carry = v.carryTail
             Task { [weak self] in
                 for a in analyzers { try? await a.finalize(through: nil) }
                 try? await Task.sleep(for: .milliseconds(200))
                 guard let self else { return }
-                let turn = self.assembler.finish(spoken: 1.0)
+                let turn = self.assembler.finish(spoken: 1.0, carryTail: carry)
                 self.segmenting = false
                 DispatchQueue.main.async { if let turn { self.onTurn?(turn) } }
             }
