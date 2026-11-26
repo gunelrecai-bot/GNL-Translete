@@ -127,11 +127,13 @@ for l in [DetectedLanguage.tr, .en] {
 
 /// Takılmaya karşı: işlem süreyi aşarsa beklemeyi bırak
 func withTimeout(_ seconds: Double, _ label: String, _ op: @escaping () async -> Void) async {
-    await withTaskGroup(of: Bool.self) { g in
-        g.addTask { await op(); return true }
-        g.addTask { try? await Task.sleep(for: .seconds(seconds)); return false }
-        if let first = await g.next(), first == false { print("⏱ zaman aşımı:", label) }
-        g.cancelAll()
+    // Takılan motor çağrısını beklemeden devam et (görev grubu takılanı da beklerdi)
+    final class Once: @unchecked Sendable { var done = false; let l = NSLock()
+        func fire() -> Bool { l.lock(); defer { l.unlock() }; if done { return false }; done = true; return true } }
+    let once = Once()
+    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+        Task { await op(); if once.fire() { c.resume() } }
+        Task { try? await Task.sleep(for: .seconds(seconds)); if once.fire() { print("⏱ zaman aşımı:", label); c.resume() } }
     }
 }
 

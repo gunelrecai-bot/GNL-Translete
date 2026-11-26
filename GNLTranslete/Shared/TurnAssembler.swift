@@ -46,7 +46,7 @@ final class TurnAssembler {
 
     func vad(rms: Float, duration: TimeInterval, muted: Bool) -> VADResult {
         if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
-        let voiced = !muted && rms > max(0.02, noiseFloor * 4)
+        let voiced = !muted && rms > max(0.01, noiseFloor * 3)
         var end = false
         var spoken: TimeInterval = 0
         var mid = false
@@ -54,6 +54,10 @@ final class TurnAssembler {
             inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration; pauseFired = false
             // hiç durmadan çok uzun konuşma: yine de parça ver
             if sinceSegment >= maxSegmentSpeech && previewWords >= minSegmentWords { mid = true; sinceSegment = 0 }
+            // "eee", "ımm", "um" gibi dolgu sesi: konuşmacı düşünüyor, o ana kadarkini çevir
+            else if !pauseFired && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords + 1 && previewEndsWithFiller {
+                mid = true; pauseFired = true; sinceSegment = 0
+            }
         } else if inSpeech {
             silence += duration
             if silence >= endSilence { end = true; inSpeech = false; silence = 0; spoken = speechTime; speechTime = 0; sinceSegment = 0; pauseFired = false }
@@ -62,6 +66,16 @@ final class TurnAssembler {
             }
         }
         return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken, midSegment: mid)
+    }
+
+    static let fillers: Set<String> = ["um", "umm", "uh", "uhh", "uhm", "hmm", "hm", "mm", "mmm", "er", "erm", "ah", "eh",
+                                       "ee", "eee", "eeee", "ıı", "ııı", "ım", "ımm", "hıı", "hımm", "hı", "aa", "aaa"]
+    static func isFiller(_ w: String) -> Bool { fillers.contains(norm(w).lowercased(with: Locale(identifier: "tr"))) }
+    static func dropFillers(_ t: String) -> String { words(t).filter { !isFiller($0) }.joined(separator: " ") }
+    var previewEndsWithFiller: Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let w = lastPreview.map({ Self.words($0.text) })?.last else { return false }
+        return Self.isFiller(w)
     }
 
     /// Şu an birikmiş (henüz karta dönmemiş) önizlemenin kelime sayısı
@@ -129,8 +143,9 @@ final class TurnAssembler {
             lanes[i].finalText = ""; lanes[i].volatileText = ""; lanes[i].confSum = 0; lanes[i].confCount = 0; lanes[i].votes = 0
         }
         lock.unlock()
-        guard spoken >= 0.4, let best = Self.decide(snapshot, final: true),
-              best.text.filter(\.isLetter).count >= 2 else { return nil }
+        guard spoken >= 0.4, var best = Self.decide(snapshot, final: true) else { return nil }
+        best = HeardTurn(text: Self.dropFillers(best.text), language: best.language, confidence: best.confidence)
+        guard best.text.filter(\.isLetter).count >= 2 else { return nil }
         return best
     }
 
