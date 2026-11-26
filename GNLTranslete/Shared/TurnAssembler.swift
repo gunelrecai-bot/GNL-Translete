@@ -29,7 +29,7 @@ final class TurnAssembler {
     var pauseSilence: TimeInterval = 0.4
     var minSegmentSpeech: TimeInterval = 2.5
     var maxSegmentSpeech: TimeInterval = 10.0
-    var minSegmentWords = 7
+    var minSegmentWords = 6
     private var sinceSegment: TimeInterval = 0
     private var pauseFired = false
     private var inSpeech = false
@@ -60,7 +60,10 @@ final class TurnAssembler {
             }
         } else if inSpeech {
             silence += duration
-            if silence >= endSilence { end = true; inSpeech = false; silence = 0; spoken = speechTime; speechTime = 0; sinceSegment = 0; pauseFired = false }
+            if silence >= endSilence {
+                // son karttan bu yana konuşulan süre: parça kesildiyse artakalan motor çöpü kart olmaz
+                end = true; inSpeech = false; silence = 0; spoken = sinceSegment; speechTime = 0; sinceSegment = 0; pauseFired = false
+            }
             else if !pauseFired && silence >= pauseSilence && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords {
                 mid = true; pauseFired = true; sinceSegment = 0
             }
