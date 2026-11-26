@@ -137,7 +137,7 @@ final class TurnAssembler {
     // MARK: Motor sonuçları
     static func clean(_ t: String) -> String {
         var s = t.trimmingCharacters(in: .whitespacesAndNewlines)
-        while let f = s.first, "-–—•".contains(f) { s.removeFirst(); s = s.trimmingCharacters(in: .whitespaces) }
+        while let f = s.first, "-–—•.,;:!?…".contains(f) { s.removeFirst(); s = s.trimmingCharacters(in: .whitespaces) }
         return s
     }
     static func words(_ t: String) -> [String] { t.split(whereSeparator: { $0.isWhitespace }).map(String.init) }
@@ -316,4 +316,21 @@ func minWindowRms(_ p: UnsafePointer<Float>, _ n: Int, _ rate: Double) -> Float 
         i += w
     }
     return best
+}
+
+/// Söz bir soru mu? (noktalama yoksa soru kelimelerine bakar)
+enum QuestionDetector {
+    static let en: Set<String> = ["what","where","when","why","who","whom","whose","which","how","do","does","did","are","is",
+                                  "was","were","can","could","would","will","should","shall","may","have","has","had","am","isn't","aren't","don't","doesn't","didn't","won't","can't"]
+    static let tr: Set<String> = ["ne","neden","niye","niçin","nasıl","nerede","nereye","nereden","nere","kim","kime","kimi","hangi","kaç","ne zaman"]
+    static func isQuestion(_ text: String, _ lang: DetectedLanguage) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        if t.hasSuffix("?") { return true }
+        if t.contains(".") || t.contains("!") { return false }   // noktalama var ve soru işareti yok
+        let ws = t.lowercased(with: Locale(identifier: "tr")).split(whereSeparator: { $0.isWhitespace || $0 == "," }).map(String.init)
+        guard let first = ws.first else { return false }
+        if lang == .en { return en.contains(first) && ws.count >= 3 }
+        if ws.contains(where: { ["mı","mi","mu","mü","mısın","misin","musun","müsün","mısınız","misiniz","musunuz","müsünüz","mıyım","miyim"].contains($0) }) { return true }
+        return ws.contains { tr.contains($0) }
+    }
 }

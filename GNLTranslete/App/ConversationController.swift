@@ -293,6 +293,7 @@ final class ConversationController {
         var turn = ConversationTurn(heard: heard.text, heardLanguage: heard.language)
         turn.tone = ToneLexicon.merge(ToneLexicon.analyze(heard.text), ToneLexicon.sentiment(heard.text))
         turn.naturalPending = heard.language == .en
+        turn.isQuestion = QuestionDetector.isQuestion(heard.text, heard.language)
         turns.append(turn)
         refreshContextHints()
 
@@ -304,6 +305,12 @@ final class ConversationController {
         update(turn)
         if AppSettings.shared.autoReadTranslation, heard.language == .en, !turn.translation.isEmpty {
             speech.enqueue(.init(text: turn.translation, lang: .tr, rateFactor: nil, generation: 0, publicSpeaker: false))
+        }
+
+        // Bana İngilizce soru soruldu: olası cevabı kendiliğinden hazırla (sesli okumadan), hemen cevap verebileyim
+        if turn.isQuestion && heard.language == .en {
+            let id = turn.id
+            Task { await self.reply(to: id, speak: false) }
         }
 
         // İngilizce söz: 3. satır doğal İngilizce (arka planda). Hafif modda yalnızca istenince üretilir.
@@ -368,7 +375,7 @@ final class ConversationController {
     }
 
     /// Cevap Ver: seçilen söze cevap üret, kartın altına yaz ve kulaklıktan oku.
-    func reply(to id: UUID) async {
+    func reply(to id: UUID, speak: Bool = true) async {
         guard var t = turns.first(where: { $0.id == id }), !t.replying else { return }
         t.replying = true
         t.reply = ""; t.replyTR = ""
@@ -384,8 +391,10 @@ final class ConversationController {
             cur.replyTR = (try? await Translator.shared.translate(r.reply, .enToTr)) ?? ""
             hint = ""
             update(cur)
-            speech.stopAll()
-            speech.enqueue(.init(text: r.reply, lang: .en, rateFactor: nil, generation: 0, publicSpeaker: false))
+            if speak {
+                speech.stopAll()
+                speech.enqueue(.init(text: r.reply, lang: .en, rateFactor: nil, generation: 0, publicSpeaker: false))
+            }
         } else {
             cur.status = ReplyGenerator.shared.loadError ?? "Cevap modeli hazır değil (Ayarlar → Cevap Modeli)"
             update(cur)

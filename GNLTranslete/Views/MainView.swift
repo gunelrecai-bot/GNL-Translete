@@ -125,6 +125,9 @@ struct MainView: View {
             .onChange(of: convo.turns.count) { _, _ in
                 if let last = convo.turns.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
+            .onChange(of: convo.turns.last?.reply) { _, _ in
+                if let last = convo.turns.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+            }
         }
     }
 
@@ -190,6 +193,11 @@ struct TurnCard: View {
             HStack(spacing: 6) {
                 Image(systemName: turn.isOwnTranslation ? "person.wave.2" : "waveform")
                 Text(turn.isOwnTranslation ? "Cümlem" : (turn.heardLanguage == .en ? "İngilizce" : "Türkçe"))
+                if turn.isQuestion && !turn.isOwnTranslation {
+                    Label("Soru", systemImage: "questionmark.bubble.fill")
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.yellow.opacity(0.45), in: Capsule())
+                }
                 Spacer()
                 if !turn.tone.isEmpty {
                     Label(turn.tone.shortWarning, systemImage: "exclamationmark.bubble")

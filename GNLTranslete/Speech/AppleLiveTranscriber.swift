@@ -236,8 +236,7 @@ final class AppleLiveTranscriber {
             lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()
             let carry = v.carryTail, force = v.forceCut
             Task { [weak self] in
-                for a in analyzers { try? await a.finalize(through: nil) }
-                try? await Task.sleep(for: .milliseconds(200))
+                await Self.finalizeQuickly(analyzers)
                 guard let self else { return }
                 let turn = self.assembler.finish(spoken: 1.0, carryTail: carry, forceCut: force)
                 self.segmenting = false
@@ -249,12 +248,23 @@ final class AppleLiveTranscriber {
             lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()
             let spoken = v.spoken
             Task { [weak self] in
-                for a in analyzers { try? await a.finalize(through: nil) }
-                try? await Task.sleep(for: .milliseconds(250))
+                await Self.finalizeQuickly(analyzers)
                 guard let self else { return }
                 let turn = self.assembler.finish(spoken: spoken)
                 DispatchQueue.main.async { if let turn { self.onTurn?(turn) } }
             }
+        }
+    }
+
+    /// Motorlara "kesinleştir" de ama en fazla 1,2 sn bekle: konuşma sürerken motor takılırsa kart üretimi durmasın.
+    static func finalizeQuickly(_ analyzers: [SpeechAnalyzer]) async {
+        final class Once: @unchecked Sendable { var done = false; let l = NSLock()
+            func fire() -> Bool { l.lock(); defer { l.unlock() }; if done { return false }; done = true; return true } }
+        let once = Once()
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            Task { for a in analyzers { try? await a.finalize(through: nil) }
+                   try? await Task.sleep(for: .milliseconds(200)); if once.fire() { c.resume() } }
+            Task { try? await Task.sleep(for: .milliseconds(1200)); if once.fire() { c.resume() } }
         }
     }
 }

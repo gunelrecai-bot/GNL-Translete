@@ -265,6 +265,15 @@ for sc in scenarios {
     print("\(ok ? "✅" : "❌") \(sc.name) → \(cards)\(ok ? "" : "  ⚠️ " + problems.joined(separator: "; "))")
     report += "| \(sc.name.split(separator: " ").first!) | \(sc.name) | \(ok ? "✅" : "❌ " + problems.joined(separator: "; ")) | \(cards) |\n"
 }
+// Soru algılama denetimi
+let qCases: [(String, DetectedLanguage, Bool)] = [
+    ("Where are you from?", .en, true), ("where are you from", .en, true), ("How long are you staying", .en, true),
+    ("Thanks for joining.", .en, false), ("I like this hotel", .en, false),
+    ("Nereden geliyorsunuz", .tr, true), ("Çay ister misiniz", .tr, true), ("Bugün hava güzel.", .tr, false)]
+let qBad = qCases.filter { QuestionDetector.isQuestion($0.0, $0.1) != $0.2 }
+print(qBad.isEmpty ? "✅ Soru algılama 8/8" : "❌ Soru algılama hatalı: \(qBad.map(\.0))")
+report += qBad.isEmpty ? "\n✅ Soru algılama 8/8\n" : "\n❌ Soru algılama: \(qBad.map(\.0))\n"
+if !qBad.isEmpty { passed -= 1 }
 print("SONUÇ: \(passed)/\(scenarios.count) geçti")
 report += "\n**Sonuç: \(passed)/\(scenarios.count)**\n"
 if let path = ProcessInfo.processInfo.environment["GITHUB_STEP_SUMMARY"] {

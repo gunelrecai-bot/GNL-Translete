@@ -68,4 +68,5 @@ struct ConversationTurn: Identifiable, Equatable {
     var tone: ToneResult = .none
     var status: String = ""
     var isOwnTranslation = false      // Cümlemi Çevir sonucu
+    var isQuestion = false            // bana soru soruldu → cevap önerisi kendiliğinden hazırlanır
 }
