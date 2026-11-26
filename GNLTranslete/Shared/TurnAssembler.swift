@@ -28,7 +28,9 @@ final class TurnAssembler {
     /// Uzun konuşmada ara kesme: kısa duraklama (nefes) + yeterince söz birikince parça kartı üretilir
     var pauseSilence: TimeInterval = 0.4
     var minSegmentSpeech: TimeInterval = 2.5
-    var maxSegmentSpeech: TimeInterval = 15.0
+    var maxSegmentSpeech: TimeInterval = 8.0
+    /// Es vermeden bu kadar kelime birikirse de (yaklaşık 2 cümle) kes
+    var maxSegmentWords = 24
     /// Ses var ama yeni kelime gelmiyor ("eee", "ımm" uzatması) → bu süreden sonra es sayılır
     var stallTime: TimeInterval = 1.0
     /// Hiç es vermeden konuşulursa her kaç tamamlanmış cümlede bir kart çıksın
@@ -69,8 +71,10 @@ final class TurnAssembler {
             } else if !pauseFired && ready && (stalled || previewEndsWithFiller) {
                 // ses sürüyor ama kelime gelmiyor ya da "eee/ımm": es gibi say
                 mid = true; pauseFired = true; sinceSegment = 0
-            } else if sinceSegment >= maxSegmentSpeech && words >= minSegmentWords {
-                mid = true; sinceSegment = 0   // son güvenlik: noktalama da yoksa
+            } else if (sinceSegment >= maxSegmentSpeech || words >= maxSegmentWords) && words >= minSegmentWords {
+                // canlı yazıda noktalama yoksa: kesinleştirince gelen noktalamaya göre son tam cümlede kes,
+                // yarım kalan cümle sonraki karta taşınır
+                mid = true; carry = true; sinceSegment = 0
             }
             if !stalled && !previewEndsWithFiller { pauseFired = false }
         } else if inSpeech {
