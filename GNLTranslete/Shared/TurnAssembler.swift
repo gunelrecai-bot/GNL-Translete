@@ -41,6 +41,8 @@ final class TurnAssembler {
     var minSegmentWords = 6
     private var sinceSegment: TimeInterval = 0
     private var pauseFired = false
+    /// Kesme kararı verildi ama kelimenin ortasında kesmemek için ilk ses inişi bekleniyor
+    private var pendingCut: (carry: Bool, waited: TimeInterval)?
     private var inSpeech = false
     private var silence: TimeInterval = 0
     private(set) var speechTime: TimeInterval = 0
@@ -53,7 +55,7 @@ final class TurnAssembler {
     // MARK: Sessizlik / sıra sonu
     struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false; var carryTail = false }
 
-    func vad(rms: Float, duration: TimeInterval, muted: Bool) -> VADResult {
+    func vad(rms: Float, duration: TimeInterval, muted: Bool, dipRms: Float? = nil) -> VADResult {
         if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
         let voiced = !muted && rms > max(0.01, noiseFloor * 3)
         var end = false
@@ -65,25 +67,34 @@ final class TurnAssembler {
             inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration
             let words = previewWords
             let ready = sinceSegment >= minSegmentSpeech && words >= minSegmentWords
-            if ready && previewCompleteSentences >= sentencesPerCard {
+            let dip = (dipRms ?? 1) < max(0.01, noiseFloor * 3) * 1.5
+            if var p = pendingCut {
+                // kelimeler arası kısa iniş (20 ms'lik pencerede) → kes; gelmezse en fazla 2,5 sn bekle
+                p.waited += duration; pendingCut = p
+                if dip || p.waited >= 2.5 { mid = true; carry = p.carry; pendingCut = nil; sinceSegment = 0 }
+            } else if ready && previewCompleteSentences >= sentencesPerCard {
                 // es vermeden konuşuyor: tamamlanan cümleleri çevir, yarım cümle sonraki karta kalsın
-                mid = true; carry = true; sinceSegment = 0; pauseFired = false
+                pendingCut = (true, 0); pauseFired = false
             } else if !pauseFired && ready && (stalled || previewEndsWithFiller) {
                 // ses sürüyor ama kelime gelmiyor ya da "eee/ımm": es gibi say
-                mid = true; pauseFired = true; sinceSegment = 0
+                pendingCut = (false, 0); pauseFired = true
             } else if (sinceSegment >= maxSegmentSpeech || words >= maxSegmentWords) && words >= minSegmentWords {
                 // canlı yazıda noktalama yoksa: kesinleştirince gelen noktalamaya göre son tam cümlede kes,
                 // yarım kalan cümle sonraki karta taşınır
-                mid = true; carry = true; sinceSegment = 0
+                pendingCut = (true, 0)
             }
             if !stalled && !previewEndsWithFiller { pauseFired = false }
         } else if inSpeech {
             silence += duration
-            if silence >= endSilence {
+            if let p = pendingCut, silence < endSilence {
+                // kelimeler arasındaki ilk kısa iniş: burada kes (kelime bölünmez)
+                mid = true; carry = p.carry; pendingCut = nil; sinceSegment = 0
+            } else if silence >= endSilence {
+                pendingCut = nil
                 // son karttan bu yana konuşulan süre: parça kesildiyse artakalan motor çöpü kart olmaz
                 end = true; inSpeech = false; silence = 0; spoken = sinceSegment; speechTime = 0; sinceSegment = 0; pauseFired = false
             }
-            else if !pauseFired && silence >= pauseSilence && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords {
+            else if !mid && !pauseFired && silence >= pauseSilence && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords {
                 mid = true; pauseFired = true; sinceSegment = 0
             }
         }
@@ -265,4 +276,19 @@ enum LanguageSplitter {
         guard merged.count > 1 else { return [h] }
         return merged.map { HeardTurn(text: $0.words.joined(separator: " "), language: $0.lang, confidence: h.confidence) }
     }
+}
+
+/// Tampon içindeki en sessiz 20 ms'lik pencerenin RMS'i (kelime arası inişleri bulmak için)
+func minWindowRms(_ p: UnsafePointer<Float>, _ n: Int, _ rate: Double) -> Float {
+    let w = max(64, Int(rate * 0.02))
+    guard n >= w else { return 1 }
+    var best: Float = 1
+    var i = 0
+    while i + w <= n {
+        var s: Float = 0
+        for k in i..<(i + w) { s += p[k] * p[k] }
+        best = min(best, sqrt(s / Float(w)))
+        i += w
+    }
+    return best
 }

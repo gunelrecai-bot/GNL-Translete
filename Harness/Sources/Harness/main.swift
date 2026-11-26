@@ -101,7 +101,7 @@ let scenarios: [Scenario] = [
           expect: [.init(lang: .tr, keywords: ["havalimanı"]), .init(lang: .tr, keywords: ["taksi"]), .init(lang: .tr, keywords: ["öğle"])]),
     .init(name: "13 Hiç es vermeden 4 cümle (cümle sonlarında bölünmeli, kayıp/tekrar yok)",
           segs: [.init(text: "I arrived at the airport very early this morning. Then I took a taxi to the hotel near the beach. After lunch we visited the old town. In the evening we had dinner by the sea.", lang: .en, gap: 1.6)],
-          expect: [.init(lang: .en, keywords: ["airport"]), .init(lang: .en, keywords: ["taxi"]), .init(lang: .en, keywords: ["lunch"]), .init(lang: .en, keywords: ["dinner"])],
+          expect: [.init(lang: .en, keywords: ["airport"]), .init(lang: .en, keywords: ["taxi"]), .init(lang: .en, keywords: ["lunch", "old town"]), .init(lang: .en, keywords: ["evening", "dinner"])],
           flexible: true),
 ]
 
@@ -194,7 +194,8 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         var sum: Float = 0
         for k in 0..<n { sum += audio[pos + k] * audio[pos + k] }
         let rms = sqrt(sum / Float(n))
-        let v = asm.vad(rms: rms, duration: Double(n) / 16000, muted: false)
+        let dip = audio.withUnsafeBufferPointer { minWindowRms($0.baseAddress! + pos, n, 16000) }
+        let v = asm.vad(rms: rms, duration: Double(n) / 16000, muted: false, dipRms: dip)
 
         guard let out = AVAudioPCMBuffer(pcmFormat: afmt, frameCapacity: AVAudioFrameCount(Double(n) * afmt.sampleRate / 16000 + 64)) else { pos += n; continue }
         var fed = false
