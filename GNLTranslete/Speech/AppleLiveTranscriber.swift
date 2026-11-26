@@ -105,6 +105,7 @@ final class AppleLiveTranscriber {
     var isMuted: () -> Bool = { false }
     var onPartial: ((String) -> Void)?
     var onPartialTurn: ((HeardTurn) -> Void)?
+    private var segmenting = false
     var onTurn: ((HeardTurn) -> Void)?
     var onLevel: ((Float, Bool) -> Void)?
     private(set) var running = false
@@ -223,6 +224,19 @@ final class AppleLiveTranscriber {
             }
         }
 
+        if v.midSegment && !segmenting {
+            // Konuşmacı susmadan, nefes arasında: o ana kadarki kısmı kart yap, dinlemeye devam et
+            segmenting = true
+            lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()
+            Task { [weak self] in
+                for a in analyzers { try? await a.finalize(through: nil) }
+                try? await Task.sleep(for: .milliseconds(200))
+                guard let self else { return }
+                let turn = self.assembler.finish(spoken: 1.0)
+                self.segmenting = false
+                DispatchQueue.main.async { if let turn { self.onTurn?(turn) } }
+            }
+        }
         if v.endTurn {
             // Önce motorlara "bu ana kadarki sesi kesinleştir" de, kesin sonuçlar gelsin; sonra kartı üret.
             lock.lock(); let analyzers = lanes.map(\.analyzer); lock.unlock()

@@ -25,6 +25,13 @@ final class TurnAssembler {
 
     // VAD
     var endSilence: TimeInterval = 0.8
+    /// Uzun konuşmada ara kesme: kısa duraklama (nefes) + yeterince söz birikince parça kartı üretilir
+    var pauseSilence: TimeInterval = 0.35
+    var minSegmentSpeech: TimeInterval = 2.0
+    var maxSegmentSpeech: TimeInterval = 10.0
+    var minSegmentWords = 6
+    private var sinceSegment: TimeInterval = 0
+    private var pauseFired = false
     private var inSpeech = false
     private var silence: TimeInterval = 0
     private(set) var speechTime: TimeInterval = 0
@@ -35,19 +42,32 @@ final class TurnAssembler {
     }
 
     // MARK: Sessizlik / sıra sonu
-    struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval }
+    struct VADResult { let speaking: Bool; let endTurn: Bool; let spoken: TimeInterval; var midSegment = false }
 
     func vad(rms: Float, duration: TimeInterval, muted: Bool) -> VADResult {
         if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
         let voiced = !muted && rms > max(0.02, noiseFloor * 4)
         var end = false
         var spoken: TimeInterval = 0
-        if voiced { inSpeech = true; silence = 0; speechTime += duration }
-        else if inSpeech {
+        var mid = false
+        if voiced {
+            inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration; pauseFired = false
+            // hiç durmadan çok uzun konuşma: yine de parça ver
+            if sinceSegment >= maxSegmentSpeech && previewWords >= minSegmentWords { mid = true; sinceSegment = 0 }
+        } else if inSpeech {
             silence += duration
-            if silence >= endSilence { end = true; inSpeech = false; silence = 0; spoken = speechTime; speechTime = 0 }
+            if silence >= endSilence { end = true; inSpeech = false; silence = 0; spoken = speechTime; speechTime = 0; sinceSegment = 0; pauseFired = false }
+            else if !pauseFired && silence >= pauseSilence && sinceSegment >= minSegmentSpeech && previewWords >= minSegmentWords {
+                mid = true; pauseFired = true; sinceSegment = 0
+            }
         }
-        return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken)
+        return VADResult(speaking: inSpeech, endTurn: end, spoken: spoken, midSegment: mid)
+    }
+
+    /// Şu an birikmiş (henüz karta dönmemiş) önizlemenin kelime sayısı
+    var previewWords: Int {
+        lock.lock(); defer { lock.unlock() }
+        return lastPreview.map { Self.words($0.text).count } ?? 0
     }
 
     // MARK: Motor sonuçları

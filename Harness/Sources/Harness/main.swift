@@ -89,6 +89,16 @@ let scenarios: [Scenario] = [
                  .init(text: "Where is the train station?", lang: .en, gap: 1.6),
                  .init(text: "Teşekkür ederim, iyi günler.", lang: .tr, gap: 1.6)],
           expect: [.init(lang: .tr, keywords: ["taksi"]), .init(lang: .en, keywords: ["station"]), .init(lang: .tr, keywords: ["teşekkür"])]),
+    .init(name: "11 Susmadan uzun İngilizce konuşma (nefes aralarında bölünmeli)",
+          segs: [.init(text: "I arrived at the airport very early this morning.", lang: .en, gap: 0.5),
+                 .init(text: "Then I took a taxi to the hotel near the beach.", lang: .en, gap: 0.5),
+                 .init(text: "After lunch we visited the old town.", lang: .en, gap: 1.6)],
+          expect: [.init(lang: .en, keywords: ["airport"]), .init(lang: .en, keywords: ["taxi"]), .init(lang: .en, keywords: ["lunch"])]),
+    .init(name: "12 Susmadan uzun Türkçe konuşma (nefes aralarında bölünmeli)",
+          segs: [.init(text: "Bu sabah çok erken saatte havalimanına vardım.", lang: .tr, gap: 0.5),
+                 .init(text: "Sonra taksiyle sahildeki otele doğru gittik.", lang: .tr, gap: 0.5),
+                 .init(text: "Öğle yemeğinden sonra eski şehri gezdik.", lang: .tr, gap: 1.6)],
+          expect: [.init(lang: .tr, keywords: ["havalimanı"]), .init(lang: .tr, keywords: ["taksi"]), .init(lang: .tr, keywords: ["yemeğ"])]),
 ]
 
 // MARK: - Motorlar
@@ -186,6 +196,11 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         if out.frameLength > 0 { for c in conts { c.yield(AnalyzerInput(buffer: out)) } }
 
         try? await Task.sleep(for: .milliseconds(25))   // gerçek zamanın ~4 katı hızla besle
+        if v.midSegment {
+            await withTimeout(8, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
+            try? await Task.sleep(for: .milliseconds(300))
+            if let t = asm.finish(spoken: 1.0) { turns += LanguageSplitter.split(t) }
+        }
         if v.endTurn {
             await withTimeout(8, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
             try? await Task.sleep(for: .milliseconds(400))
