@@ -25,6 +25,12 @@ struct SettingsView: View {
                     }
                     Text(whisperStatus).font(.footnote).foregroundStyle(.secondary)
                 }
+                Picker("Mikrofon menzili", selection: $s.micRange) {
+                    ForEach(MicRange.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: settings.micRange) { _, _ in ConversationController.shared.restartListening() }
+                Text("Mikrofon menzili: " + settings.micRange.info).font(.footnote).foregroundStyle(.secondary)
                 Toggle("Gürültü azaltma", isOn: $s.noiseReduction)
                     .onChange(of: settings.noiseReduction) { _, _ in ConversationController.shared.restartListening() }
                 Toggle("Konuya göre ipucu (Apple motoru)", isOn: $s.contextHints)

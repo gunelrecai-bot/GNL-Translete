@@ -120,6 +120,9 @@ final class AppleLiveTranscriber {
         AudioRoute.shared.configure()
         assembler = TurnAssembler(langs: langs)
         assembler.endSilence = endSilence
+        let range = AppSettings.shared.micRange
+        assembler.maxGain = range.maxGain
+        assembler.minVoice = range.minVoice
         var built: [Lane] = []
         var modules: [any SpeechModule] = []
         let dict = AppleSpeechSupport.shared.turkishViaDictation

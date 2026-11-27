@@ -57,10 +57,13 @@ final class TurnAssembler {
 
     // MARK: Otomatik kazanç (kısık ses)
     private var speechLevel: Float = 0.06
+    /// Mikrofon menzili: en fazla kaç kat yükseltilsin ve en az ne kadar yüksek ses konuşma sayılsın
+    var maxGain: Float = 8
+    var minVoice: Float = 0.01
     /// Bu tamponun kaç kat yükseltileceği (uzaktaki/kısık konuşmacı için en fazla 8 kat)
     func gain(for rms: Float) -> Float {
         if rms > 0.002 { speechLevel = 0.8 * speechLevel + 0.2 * rms }
-        return min(8, max(1, 0.06 / max(speechLevel, 0.001)))
+        return min(maxGain, max(1, 0.06 / max(speechLevel, 0.001)))
     }
 
     // MARK: Sessizlik / sıra sonu
@@ -68,7 +71,7 @@ final class TurnAssembler {
 
     func vad(rms: Float, duration: TimeInterval, muted: Bool, dipRms: Float? = nil) -> VADResult {
         if !inSpeech { noiseFloor = 0.95 * noiseFloor + 0.05 * min(rms, 0.05) }
-        let voiced = !muted && rms > max(0.01, noiseFloor * 3)
+        let voiced = !muted && rms > max(minVoice, noiseFloor * 3)
         var end = false
         var spoken: TimeInterval = 0
         var mid = false
@@ -80,7 +83,7 @@ final class TurnAssembler {
             inSpeech = true; silence = 0; speechTime += duration; sinceSegment += duration
             let words = previewWords
             let ready = sinceSegment >= minSegmentSpeech && words >= minSegmentWords
-            let dip = (dipRms ?? 1) < max(0.01, noiseFloor * 3) * 1.5
+            let dip = (dipRms ?? 1) < max(minVoice, noiseFloor * 3) * 1.5
             if var p = pendingCut {
                 // kelimeler arası kısa iniş (20 ms'lik pencerede) → kes; gelmezse en fazla 2,5 sn bekle
                 p.waited += duration; pendingCut = p

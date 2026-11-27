@@ -60,7 +60,7 @@ func speak(_ text: String, _ lang: DetectedLanguage) -> [Float] {
 // MARK: - Senaryolar
 struct Seg { let text: String; let lang: DetectedLanguage; let gap: Double; var vol: Float = 1 }
 struct Expect { let lang: DetectedLanguage; let keywords: [String] }
-struct Scenario { let name: String; let segs: [Seg]; let expect: [Expect]; var flexible = false }
+struct Scenario { let name: String; let segs: [Seg]; let expect: [Expect]; var flexible = false; var near = false }
 
 let scenarios: [Scenario] = [
     .init(name: "1 Türkçe tanışma", segs: [.init(text: "Merhaba, benim adım Recai.", lang: .tr, gap: 1.6)],
@@ -107,6 +107,12 @@ let scenarios: [Scenario] = [
           segs: [.init(text: "Good morning everyone, thanks for joining us today.", lang: .en, gap: 0.6, vol: 0.12),
                  .init(text: "Please have a look at the menu on the table.", lang: .en, gap: 1.6, vol: 0.12)],
           expect: [.init(lang: .en, keywords: ["morning"]), .init(lang: .en, keywords: ["menu"])], flexible: true),
+    .init(name: "16 Yakın menzil: uzaktaki kısık ses alınmamalı",
+          segs: [.init(text: "Please have a look at the menu on the table.", lang: .en, gap: 1.6, vol: 0.06)],
+          expect: [], near: true),
+    .init(name: "17 Yakın menzil: yakındaki normal ses alınmalı",
+          segs: [.init(text: "Can I have the bill, please?", lang: .en, gap: 1.6)],
+          expect: [.init(lang: .en, keywords: ["bill"])], near: true),
     .init(name: "14 Cümle ortasında duraklama (bölünmemeli, tek kart)",
           segs: [.init(text: "Yesterday afternoon my wife and I went together to the", lang: .en, gap: 0.55),
                  .init(text: "big shopping mall with my family.", lang: .en, gap: 1.6)],
@@ -167,6 +173,7 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
 
     let langs: [DetectedLanguage] = [.tr, .en]
     let asm = TurnAssembler(langs: langs)
+    if sc.near { asm.maxGain = 1; asm.minVoice = 0.03 }   // Yakın menzil
     var analyzers: [SpeechAnalyzer] = []
     var conts: [AsyncStream<AnalyzerInput>.Continuation] = []
     var tasks: [Task<Void, Never>] = []

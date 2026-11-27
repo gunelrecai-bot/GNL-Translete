@@ -54,6 +54,8 @@ final class AppSettings {
     var lightMode: Bool { didSet { d.set(lightMode, forKey: "lightMode") } }
     var speechEngine: SpeechEngineChoice { didSet { d.set(speechEngine.rawValue, forKey: "speechEngine") } }
     var noiseReduction: Bool { didSet { d.set(noiseReduction, forKey: "noiseReduction") } }
+    /// Mikrofon menzili: Yakın (yalnızca yanımdakiler) / Normal / Uzak (kısık sesleri de yükselt)
+    var micRange: MicRange { didSet { d.set(micRange.rawValue, forKey: "micRange") } }
     var contextHints: Bool { didSet { d.set(contextHints, forKey: "contextHints") } }
     /// Sık kullanılan isimler (virgülle): motor bunları doğru yazmaya çalışır
     var customNames: String { didSet { d.set(customNames, forKey: "customNames") } }
@@ -84,6 +86,7 @@ final class AppSettings {
         lightMode = d.object(forKey: "lightMode") as? Bool ?? true
         speechEngine = SpeechEngineChoice(rawValue: d.string(forKey: "speechEngine") ?? "") ?? .apple
         noiseReduction = d.bool(forKey: "noiseReduction")
+        micRange = MicRange(rawValue: d.string(forKey: "micRange") ?? "") ?? .normal
         contextHints = d.object(forKey: "contextHints") as? Bool ?? true
         customNames = d.string(forKey: "customNames") ?? ""
     }
@@ -99,4 +102,18 @@ final class AppSettings {
         case .system: return Themes.palette(scheme == .dark ? darkThemeID : lightThemeID)
         }
     }
+}
+
+enum MicRange: String, CaseIterable {
+    case near, normal, far
+    var title: String { switch self { case .near: "Yakın"; case .normal: "Normal"; case .far: "Uzak" } }
+    var info: String {
+        switch self {
+        case .near: return "Yalnızca telefona yakın konuşanlar. Uzaktaki sesler ve arka plan konuşmaları alınmaz."
+        case .normal: return "Masadaki karşılıklı konuşma için. Biraz uzaktaki kısık sesler alınmaz."
+        case .far: return "Uzaktaki hoparlör, sahne, toplantı salonu. Kısık sesler de yükseltilir; çevredeki konuşmalar da karışabilir."
+        }
+    }
+    var maxGain: Float { switch self { case .near: 1; case .normal: 3; case .far: 8 } }
+    var minVoice: Float { switch self { case .near: 0.03; case .normal: 0.015; case .far: 0.01 } }
 }
