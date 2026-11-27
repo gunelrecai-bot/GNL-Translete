@@ -32,7 +32,7 @@ final class TurnAssembler {
     /// Es vermeden bu kadar kelime birikirse de (yaklaşık 2 cümle) kes
     var maxSegmentWords = 24
     /// Ses var ama yeni kelime gelmiyor ("eee", "ımm" uzatması) → bu süreden sonra es sayılır
-    var stallTime: TimeInterval = 1.0
+    var stallTime: TimeInterval = 1.6
     /// Hiç es vermeden konuşulursa her kaç tamamlanmış cümlede bir kart çıksın
     var sentencesPerCard = 2
     private var clock: TimeInterval = 0
