@@ -225,6 +225,10 @@ func runScenario(_ sc: Scenario) async -> [HeardTurn] {
         if out.frameLength > 0 { for c in conts { c.yield(AnalyzerInput(buffer: out)) } }
 
         try? await Task.sleep(for: .milliseconds(100))   // gerçek zamanlı besle (telefondaki gibi)
+        if v.midSegment || v.endTurn {
+            print(String(format: "   %@ t=%.1f önizleme=%@ yarım=%@", v.endTurn ? "⏹ son" : "✂︎ kes(force:\(v.forceCut))", Double(pos) / 16000,
+                         asm.lastPreview?.text ?? "-", asm.previewIncomplete ? "evet" : "hayır"))
+        }
         if v.midSegment {
             await withTimeout(20, "finalize") { for a in analyzers { try? await a.finalize(through: nil) } }
             try? await Task.sleep(for: .milliseconds(300))
