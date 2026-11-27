@@ -155,7 +155,8 @@ final class TurnAssembler {
     /// Şu anki metin yarım mı bitiyor? ("the…", "to,", "and" gibi)
     var previewIncomplete: Bool {
         lock.lock(); defer { lock.unlock() }
-        let t = lastPreview?.text ?? heldText
+        // önizleme dili yanlış seçmiş olabilir: kesin karar kuralıyla en iyi şeridin metnine bak
+        let t = Self.decide(lanes, final: true)?.text ?? heldText
         guard let w = Self.words(t).last else { return false }
         if w.hasSuffix("…") || w.hasSuffix("..") || w.hasSuffix(",") { return true }
         return Self.openEnders.contains(Self.norm(w).lowercased(with: Locale(identifier: "tr")))
@@ -164,7 +165,8 @@ final class TurnAssembler {
     /// Şu an birikmiş (henüz karta dönmemiş) önizlemenin kelime sayısı
     var previewWords: Int {
         lock.lock(); defer { lock.unlock() }
-        return lastPreview.map { Self.words($0.text).count } ?? 0
+        // şeritlerden en uzunu (önizleme yanlış dili seçse bile birikmiş söz sayılır)
+        return lanes.map { Self.words($0.finalText + " " + $0.volatileText).count }.max() ?? 0
     }
 
     // MARK: Motor sonuçları
