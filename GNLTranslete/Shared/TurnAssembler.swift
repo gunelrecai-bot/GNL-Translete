@@ -39,6 +39,10 @@ final class TurnAssembler {
     private var lastGrowth: TimeInterval = 0
     private var lastWordCount = 0
     private var lastCutSince: TimeInterval = 0
+    /// Bekletilen (bitmemiş) metin
+    private var heldText = ""
+    /// Cümle yarımken konuşmacı susarsa en fazla bu kadar daha bekle (yapay zekâ sesleri cümle ortasında duraklar)
+    var incompleteHold: TimeInterval = 2.5
     var minSegmentWords = 6
     private var sinceSegment: TimeInterval = 0
     private var pauseFired = false
@@ -105,7 +109,7 @@ final class TurnAssembler {
             if let p = pendingCut, silence < endSilence {
                 // kelimeler arasındaki ilk kısa iniş: burada kes (kelime bölünmez)
                 mid = true; carry = true; force = p.force; pendingCut = nil; lastCutSince = sinceSegment; sinceSegment = 0
-            } else if silence >= endSilence {
+            } else if silence >= endSilence && (silence >= incompleteHold || !previewIncomplete) {
                 pendingCut = nil
                 // son karttan bu yana konuşulan süre: parça kesildiyse artakalan motor çöpü kart olmaz
                 end = true; inSpeech = false; silence = 0; spoken = sinceSegment; speechTime = 0; sinceSegment = 0; pauseFired = false
@@ -130,12 +134,31 @@ final class TurnAssembler {
     static let openEnders: Set<String> = [
         "the","a","an","to","of","and","or","but","in","on","at","for","with","from","by","my","your","our","their","his","her",
         "because","if","than","ve","veya","ama","fakat","ile","için","bir","çünkü","eğer","hem"]
+    /// Önceki kelimeden kopan baştaki harf parçasını ("m. Then") at; ağza alınmayacak yanlış duymaları maskele
+    static let masked: Set<String> = ["nigger","nigga","faggot","retard","cunt"]
+    static func tidy(_ t: String) -> String {
+        var ws = words(t)
+        if ws.count > 2, let f = ws.first, f.filter(\.isLetter).count <= 2, ".…,".contains(f.last ?? " "),
+           ws[1].first?.isUppercase == true { ws.removeFirst() }
+        ws = ws.map { w in masked.contains(norm(w).lowercased()) ? String(repeating: "•", count: 3) + w.filter { !$0.isLetter } : w }
+        return ws.joined(separator: " ")
+    }
+
     static func isSentenceEnd(_ w: String) -> Bool { guard let c = w.last else { return false }; return ".?!…".contains(c) }
     /// Önizlemede, arkasından başka söz gelmiş (tamamlanmış) cümle sayısı
     var previewCompleteSentences: Int {
         lock.lock(); defer { lock.unlock() }
         guard let ws = lastPreview.map({ Self.words($0.text) }), ws.count > 1 else { return 0 }
         return ws.dropLast().filter(Self.isSentenceEnd).count
+    }
+
+    /// Şu anki metin yarım mı bitiyor? ("the…", "to,", "and" gibi)
+    var previewIncomplete: Bool {
+        lock.lock(); defer { lock.unlock() }
+        let t = lastPreview?.text ?? heldText
+        guard let w = Self.words(t).last else { return false }
+        if w.hasSuffix("…") || w.hasSuffix("..") || w.hasSuffix(",") { return true }
+        return Self.openEnders.contains(Self.norm(w).lowercased(with: Locale(identifier: "tr")))
     }
 
     /// Şu an birikmiş (henüz karta dönmemiş) önizlemenin kelime sayısı
@@ -227,16 +250,18 @@ final class TurnAssembler {
                 }
             } else {
                 // cümle hiç bitmemiş: hepsini hafızada tut, konuşma sürdükçe tamamlanacak
-                tail = d.text; decided = nil
+                tail = d.text; decided = nil; heldText = d.text
                 tailLane = lanes.firstIndex { $0.lang == d.language }
                 restoreSince = lastCutSince
             }
         }
+        if decided != nil { heldText = "" }
         if let k = tailLane { lanes[k].finalText = tail }
         lock.unlock()
         guard var best = decided else { return nil }
         guard spoken >= 0.4 || Self.words(best.text).count >= 3 else { return nil }
         best = HeardTurn(text: Self.dropFillers(best.text), language: best.language, confidence: best.confidence)
+        best = HeardTurn(text: Self.tidy(best.text), language: best.language, confidence: best.confidence)
         guard best.text.filter(\.isLetter).count >= 2 else { return nil }
         return best
     }
